@@ -1,0 +1,19 @@
+{
+  "name": "api-gateway-lambda-authorizer",
+  "version": "1.0.0",
+  "description": "JWT-based API Gateway Lambda Authorizer",
+  "main": "index.js",
+  "engines": {
+    "node": ">=20.x"
+  },
+  "scripts": {
+    "test": "jest --coverage",
+    "package": "zip -r authorizer.zip index.js node_modules"
+  },
+  "dependencies": {
+    "jsonwebtoken": "^9.0.2"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0"
+  }
+}

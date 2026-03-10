@@ -1,0 +1,176 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  API Gateway with JWT Lambda Authorizer
+  Deploys: Authorizer Lambda, a sample backend Lambda, and an HTTP API.
+
+# ---------------------------------------------------------------------------
+# Parameters
+# ---------------------------------------------------------------------------
+Parameters:
+  JwtSecret:
+    Type: String
+    NoEcho: true
+    Description: Secret used to sign/verify HS256 JWTs (min 32 chars recommended)
+
+  JwtAlgorithm:
+    Type: String
+    Default: HS256
+    AllowedValues: [HS256, HS384, HS512, RS256, RS384, RS512]
+    Description: JWT signing algorithm
+
+  JwtIssuer:
+    Type: String
+    Default: ''
+    Description: "(Optional) Expected JWT issuer (iss claim)"
+
+  JwtAudience:
+    Type: String
+    Default: ''
+    Description: "(Optional) Expected JWT audience (aud claim)"
+
+  AllowedScopes:
+    Type: String
+    Default: ''
+    Description: "(Optional) Comma-separated list of required JWT scopes"
+
+  AuthorizerCacheTtl:
+    Type: Number
+    Default: 300
+    MinValue: 0
+    MaxValue: 3600
+    Description: "Authorizer result cache TTL in seconds (0 = disable cache)"
+
+  StageName:
+    Type: String
+    Default: prod
+    Description: API Gateway stage name
+
+# ---------------------------------------------------------------------------
+# Globals
+# ---------------------------------------------------------------------------
+Globals:
+  Function:
+    Runtime: nodejs20.x
+    Architectures: [arm64]
+    Timeout: 10
+    MemorySize: 256
+    Environment:
+      Variables:
+        NODE_OPTIONS: --enable-source-maps
+
+# ---------------------------------------------------------------------------
+# Resources
+# ---------------------------------------------------------------------------
+Resources:
+
+  # ---- Authorizer Lambda ----
+  AuthorizerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${AWS::StackName}-authorizer'
+      CodeUri: ../lambda-authorizer/
+      Handler: index.handler
+      Description: JWT Lambda Authorizer for API Gateway
+      Environment:
+        Variables:
+          JWT_SECRET:    !Ref JwtSecret
+          JWT_ALGORITHM: !Ref JwtAlgorithm
+          JWT_ISSUER:    !Ref JwtIssuer
+          JWT_AUDIENCE:  !Ref JwtAudience
+          ALLOWED_SCOPES: !Ref AllowedScopes
+      Policies:
+        - AWSLambdaBasicExecutionRole
+
+  # Permission for API Gateway to invoke the authorizer
+  AuthorizerFunctionPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt AuthorizerFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGateway}/*'
+
+  # ---- Sample Backend Lambda ----
+  BackendFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${AWS::StackName}-backend'
+      InlineCode: |
+        exports.handler = async (event) => {
+          // Access authorizer context via requestContext
+          const auth = event.requestContext?.authorizer?.lambda || {};
+          return {
+            statusCode: 200,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              message: 'Hello from the protected endpoint!',
+              userId:  auth.userId  || 'unknown',
+              email:   auth.email   || 'unknown',
+              roles:   JSON.parse(auth.roles  || '[]'),
+              scopes:  JSON.parse(auth.scopes || '[]'),
+            }),
+          };
+        };
+      Handler: index.handler
+      Events:
+        GetPets:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ApiGateway
+            Method: GET
+            Path: /pets
+        GetPet:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ApiGateway
+            Method: GET
+            Path: /pets/{id}
+
+  # ---- HTTP API (API Gateway v2) ----
+  ApiGateway:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: !Ref StageName
+      Auth:
+        DefaultAuthorizer: JwtLambdaAuthorizer
+        Authorizers:
+          JwtLambdaAuthorizer:
+            AuthorizerType: REQUEST           # Lambda authorizer type for HTTP API
+            AuthorizerPayloadFormatVersion: '2.0'
+            EnableSimpleResponses: false      # We return full IAM policy
+            FunctionArn: !GetAtt AuthorizerFunction.Arn
+            Identity:
+              Headers:
+                - Authorization
+            AuthorizerResultTtlInSeconds: !Ref AuthorizerCacheTtl
+      CorsConfiguration:
+        AllowOrigins:
+          - '*'
+        AllowHeaders:
+          - Authorization
+          - Content-Type
+        AllowMethods:
+          - GET
+          - POST
+          - OPTIONS
+
+# ---------------------------------------------------------------------------
+# Outputs
+# ---------------------------------------------------------------------------
+Outputs:
+  ApiEndpoint:
+    Description: Base URL of the API
+    Value: !Sub 'https://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com/${StageName}'
+    Export:
+      Name: !Sub '${AWS::StackName}-ApiEndpoint'
+
+  AuthorizerFunctionArn:
+    Description: ARN of the Lambda Authorizer
+    Value: !GetAtt AuthorizerFunction.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-AuthorizerArn'
+
+  BackendFunctionArn:
+    Description: ARN of the sample backend Lambda
+    Value: !GetAtt BackendFunction.Arn
