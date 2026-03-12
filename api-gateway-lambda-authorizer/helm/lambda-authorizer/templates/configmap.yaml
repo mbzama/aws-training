@@ -1,0 +1,82 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "lambda-authorizer.fullname" . }}-scripts
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "lambda-authorizer.labels" . | nindent 4 }}
+data:
+  deploy.sh: |
+    #!/bin/bash
+    set -euo pipefail
+
+    AWS_REGION="${AWS_REGION}"
+    S3_BUCKET="${S3_BUCKET}"
+
+    deploy_function() {
+      local FUNCTION_NAME="$1"
+      local S3_KEY="$2"
+      local SOURCE_DIR="$3"
+
+      echo "==> Deploying Lambda: ${FUNCTION_NAME}"
+
+      # Build + upload zip if a source directory is provided
+      if [ -n "${SOURCE_DIR}" ] && [ -d "${SOURCE_DIR}" ]; then
+        echo "    Building zip from ${SOURCE_DIR} ..."
+        cd "${SOURCE_DIR}"
+
+        # Install production dependencies
+        if [ -f "package.json" ]; then
+          npm ci --omit=dev --silent
+        fi
+
+        # Create zip (exclude test files and coverage reports)
+        zip -r /tmp/lambda.zip . \
+          --exclude "*.test.js" \
+          --exclude "coverage/*" \
+          --exclude ".nyc_output/*" \
+          --exclude "*.md"
+
+        echo "    Uploading to s3://${S3_BUCKET}/${S3_KEY} ..."
+        aws s3 cp /tmp/lambda.zip "s3://${S3_BUCKET}/${S3_KEY}" \
+          --region "${AWS_REGION}"
+
+        rm -f /tmp/lambda.zip
+        cd -
+      else
+        echo "    Skipping build — using existing s3://${S3_BUCKET}/${S3_KEY}"
+      fi
+
+      # Update Lambda function code
+      echo "    Calling lambda:UpdateFunctionCode ..."
+      aws lambda update-function-code \
+        --function-name "${FUNCTION_NAME}" \
+        --s3-bucket "${S3_BUCKET}" \
+        --s3-key "${S3_KEY}" \
+        --region "${AWS_REGION}" \
+        --output table
+
+      # Wait until the update is complete
+      echo "    Waiting for update to complete ..."
+      aws lambda wait function-updated \
+        --function-name "${FUNCTION_NAME}" \
+        --region "${AWS_REGION}"
+
+      echo "    Done: ${FUNCTION_NAME}"
+    }
+
+    {{- if .Values.functions.authorizer.enabled }}
+    deploy_function \
+      "{{ .Values.functions.authorizer.functionName }}" \
+      "{{ .Values.functions.authorizer.s3Key }}" \
+      "{{ .Values.functions.authorizer.sourceDir }}"
+    {{- end }}
+
+    {{- if .Values.functions.backend.enabled }}
+    deploy_function \
+      "{{ .Values.functions.backend.functionName }}" \
+      "{{ .Values.functions.backend.s3Key }}" \
+      "{{ .Values.functions.backend.sourceDir }}"
+    {{- end }}
+
+    echo "==> All Lambda deployments completed successfully."

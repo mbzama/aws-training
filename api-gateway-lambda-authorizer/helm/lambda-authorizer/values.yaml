@@ -1,0 +1,69 @@
+# Default values for lambda-authorizer Helm chart.
+# Override these with -f values.yaml or --set on the CLI.
+
+# AWS region where the Lambda functions are deployed
+awsRegion: us-east-1
+
+# S3 bucket that holds the compiled Lambda zip files.
+# The deploy Job uploads new zips here before updating each function.
+s3:
+  bucket: ""          # required
+  prefix: "builds"    # key prefix inside the bucket (no trailing slash)
+
+# Lambda functions to update on each helm upgrade.
+# Each entry corresponds to one aws lambda update-function-code call.
+functions:
+  authorizer:
+    enabled: true
+    # AWS Lambda function name (must match what Terraform created)
+    functionName: "lambda-authorizer-prod-authorizer"
+    # S3 key of the pre-built zip.  The deploy job uploads from
+    # sourceDir before calling UpdateFunctionCode.
+    s3Key: "builds/authorizer.zip"
+    # Path inside the container image where the source code lives.
+    # Set to "" to skip the build step and use an existing S3 object.
+    sourceDir: "/src/lambda-authorizer"
+
+  backend:
+    enabled: true
+    functionName: "lambda-authorizer-prod-backend"
+    s3Key: "builds/backend.zip"
+    sourceDir: "/src/lambda-authorizer"   # re-uses same source for demo; change as needed
+
+# Container image that runs the deploy job.
+# Must have: aws-cli, node (if building from source), zip
+image:
+  repository: amazon/aws-cli   # or a custom image with node + zip + awscli
+  tag: "2.15.0"
+  pullPolicy: IfNotPresent
+
+# Service account used by the deploy Job.
+# Annotate with an IRSA role ARN so the job can call AWS APIs
+# without static credentials.
+serviceAccount:
+  create: true
+  name: ""    # leave empty to auto-generate from chart name + release name
+  annotations: {}
+  # Example IRSA annotation:
+  # annotations:
+  #   eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/lambda-deploy-role
+
+# Optional: static AWS credentials (prefer IRSA / instance profile instead)
+awsCredentials:
+  secretName: ""   # name of a pre-existing secret with AWS_ACCESS_KEY_ID,
+                   # AWS_SECRET_ACCESS_KEY, (optional) AWS_SESSION_TOKEN
+
+# Resource limits for the deploy Job pod
+resources:
+  requests:
+    cpu: "200m"
+    memory: "256Mi"
+  limits:
+    cpu: "500m"
+    memory: "512Mi"
+
+# How long Kubernetes keeps completed Job pods (seconds)
+ttlSecondsAfterFinished: 300
+
+# Restart policy for the Job pod
+backoffLimit: 2

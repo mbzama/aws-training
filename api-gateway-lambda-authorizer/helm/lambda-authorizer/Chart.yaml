@@ -1,0 +1,17 @@
+apiVersion: v2
+name: lambda-authorizer
+description: >
+  Helm chart to deploy Lambda function code updates for the API Gateway
+  Lambda Authorizer and backend service. Runs a Kubernetes Job that
+  packages the source, uploads the zip to S3, and calls
+  lambda:UpdateFunctionCode for each configured function.
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+keywords:
+  - aws
+  - lambda
+  - api-gateway
+  - authorizer
+maintainers:
+  - name: platform-team

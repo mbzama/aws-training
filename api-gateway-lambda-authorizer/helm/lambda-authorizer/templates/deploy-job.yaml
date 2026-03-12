@@ -1,0 +1,64 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  # Unique name per appVersion so helm upgrade always creates a new Job
+  name: {{ include "lambda-authorizer.jobName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "lambda-authorizer.labels" . | nindent 4 }}
+  annotations:
+    # Force re-run on every helm upgrade
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  backoffLimit: {{ .Values.backoffLimit }}
+  ttlSecondsAfterFinished: {{ .Values.ttlSecondsAfterFinished }}
+  template:
+    metadata:
+      labels:
+        {{- include "lambda-authorizer.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: deployer
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ include "lambda-authorizer.serviceAccountName" . }}
+
+      {{- if .Values.awsCredentials.secretName }}
+      # Mount static AWS credentials from a pre-existing Secret.
+      # Prefer IRSA (service account annotations) over static credentials.
+      volumes:
+        - name: scripts
+          configMap:
+            name: {{ include "lambda-authorizer.fullname" . }}-scripts
+            defaultMode: 0755
+      {{- else }}
+      volumes:
+        - name: scripts
+          configMap:
+            name: {{ include "lambda-authorizer.fullname" . }}-scripts
+            defaultMode: 0755
+      {{- end }}
+
+      containers:
+        - name: lambda-deployer
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/bin/bash", "/scripts/deploy.sh"]
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+
+          env:
+            - name: AWS_REGION
+              value: {{ .Values.awsRegion | quote }}
+            - name: S3_BUCKET
+              value: {{ .Values.s3.bucket | quote }}
+
+          {{- if .Values.awsCredentials.secretName }}
+          envFrom:
+            - secretRef:
+                name: {{ .Values.awsCredentials.secretName }}
+          {{- end }}
+
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
