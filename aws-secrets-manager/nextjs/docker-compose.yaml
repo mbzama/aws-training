@@ -1,0 +1,32 @@
+services:
+
+  # ── Init: fetch secret from AWS and write to shared volume ──────────────────
+  secrets-init:
+    image: amazon/aws-cli:latest
+    environment:
+      AWS_REGION:            ${AWS_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID:     ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      AWS_SESSION_TOKEN:     ${AWS_SESSION_TOKEN:-}
+      SECRET_NAME:           ${SECRET_NAME:-app_web}
+    volumes:
+      - secrets-volume:/mnt/aws-secrets
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - "aws secretsmanager get-secret-value --secret-id $$SECRET_NAME --query SecretString --output text > /mnt/aws-secrets/app_web.json && echo 'Secret written to /mnt/aws-secrets/app_web.json'"
+
+  # ── Next.js web app ─────────────────────────────────────────────────────────
+  web:
+    build: .
+    ports:
+      - "3000:3000"
+    depends_on:
+      secrets-init:
+        condition: service_completed_successfully
+    volumes:
+      - secrets-volume:/mnt/aws-secrets:ro
+    environment:
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+
+volumes:
+  secrets-volume:

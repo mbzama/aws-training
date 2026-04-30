@@ -1,0 +1,53 @@
+# Dependencies (reinstalled inside the image)
+node_modules/
+
+# Build output (rebuilt inside the image)
+.next/
+out/
+dist/
+build/
+
+# Environment files — never bake secrets into the image
+.env
+.env.*
+.env.local
+.env.*.local
+
+# Git
+.git/
+.gitignore
+
+# Docker
+.dockerignore
+Dockerfile*
+docker-compose*.yml
+
+# Kubernetes / Helm
+helm/
+k8s/
+
+# Tests
+coverage/
+**/*.test.ts
+**/*.spec.ts
+
+# Logs
+*.log
+logs/
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# TypeScript build info
+*.tsbuildinfo
+
+# README / docs
+README.md
+*.md

@@ -1,0 +1,39 @@
+# Remote Applications Registry
+# Maps each micro-frontend to its Module Federation entry point and route configuration.
+# The host container reads this file at startup to dynamically register remote apps.
+
+remotes:
+  landing:
+    name: landing
+    scope: landing
+    url: https://${CLOUDFRONT_DOMAIN}/index.html
+    component: ./App
+    port: 3000
+    routes:
+      - path: /
+        layout: empty
+
+  users:
+    name: users
+    scope: users
+    # Set CLOUDFRONT_DOMAIN via environment variable or override in local YAML
+    url: https://${CLOUDFRONT_DOMAIN}/users/remoteEntry.js
+    component: ./App
+    port: 3001
+    routes:
+      - path: /users
+        layout: main
+      - path: /users/*
+        layout: main
+
+  movies:
+    name: movies
+    scope: movies
+    url: https://${CLOUDFRONT_DOMAIN}/movies/remoteEntry.js
+    component: ./App
+    port: 3002
+    routes:
+      - path: /movies
+        layout: main
+      - path: /movies/*
+        layout: main

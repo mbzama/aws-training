@@ -149,8 +149,16 @@ aws cloudformation describe-stacks \
 
 ## Testing the Deployed API
 
+After deploying, get the API endpoint from the CloudFormation stack outputs:
+
 ```bash
-API_URL="https://mamkqj9vr7.execute-api.us-east-1.amazonaws.com/prod"
+API_URL=$(aws cloudformation describe-stacks \
+  --stack-name api-authorizer-demo \
+  --query 'Stacks[0].Outputs[?OutputKey==`ApiEndpoint`].OutputValue' \
+  --output text)
+
+echo $API_URL
+# https://<api-id>.execute-api.us-east-1.amazonaws.com/prod
 ```
 
 ---
@@ -177,7 +185,7 @@ Token (expires in 1h):
 eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 
 curl command:
-curl -i -H "Authorization: Bearer eyJhbGci..." https://mamkqj9vr7.execute-api.us-east-1.amazonaws.com/prod/pets
+curl -i -H "Authorization: Bearer eyJhbGci..." https://&lt;api-id&gt;.execute-api.us-east-1.amazonaws.com/prod/pets
 ```
 
 > **Custom secret:** set `JWT_SECRET` env var to override the default:

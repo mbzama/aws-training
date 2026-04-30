@@ -1,0 +1,60 @@
+# ── Node ─────────────────────────────────────────────────────────────────────
+node_modules/
+.pnpm-store/
+.npm/
+
+# ── Next.js ──────────────────────────────────────────────────────────────────
+.next/
+out/
+build/
+
+# ── Environment variables ─────────────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+.env.development
+.env.production
+
+# ── Terraform ────────────────────────────────────────────────────────────────
+**/.terraform/
+**/.terraform.lock.hcl
+**/terraform.tfstate
+**/terraform.tfstate.backup
+**/terraform.tfstate.*.backup
+**/crash.log
+**/override.tf
+**/override.tf.json
+**/*_override.tf
+**/*_override.tf.json
+**/tfplan
+*.tfplan
+
+# Keep tfvars checked in (no secrets in this repo) but ignore local overrides
+**/terraform.tfvars.local
+
+# ── Docker ───────────────────────────────────────────────────────────────────
+.dockerignore
+
+# ── OS ───────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── Editor ───────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ── Logs ─────────────────────────────────────────────────────────────────────
+*.log
+logs/
+npm-debug.log*
+pnpm-debug.log*
+
+# ── Test / Coverage ───────────────────────────────────────────────────────────
+coverage/
+.vitest-cache/
+
+# ── Misc ─────────────────────────────────────────────────────────────────────
+dist/
+*.tgz

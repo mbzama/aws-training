@@ -1,0 +1,51 @@
+# ── Image ─────────────────────────────────────────────────────────────────────
+image:
+  repository: nextjs-web
+  tag: latest
+  pullPolicy: IfNotPresent
+
+# ── AWS ───────────────────────────────────────────────────────────────────────
+aws:
+  region: us-east-1
+  secretName: app_web
+  # IRSA: annotate the service account with your IAM role ARN.
+  # If left empty, the chart falls back to explicit credentials via awsCredentials.
+  irsaRoleArn: ""
+
+# Explicit credentials (used only when irsaRoleArn is empty — dev/local only)
+awsCredentials:
+  accessKeyId: ""
+  secretAccessKey: ""
+  sessionToken: ""
+
+# ── Deployment ────────────────────────────────────────────────────────────────
+replicaCount: 1
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 3000
+
+ingress:
+  enabled: false
+  className: ""
+  host: app.example.com
+  tls: []
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+# ── Service Account ───────────────────────────────────────────────────────────
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+# ── Init container ────────────────────────────────────────────────────────────
+initContainer:
+  image: amazon/aws-cli:latest

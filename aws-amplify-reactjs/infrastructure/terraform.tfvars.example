@@ -1,0 +1,9 @@
+# ============================================================
+# Example variable values — copy this file to terraform.tfvars
+# and fill in real values.  Never commit terraform.tfvars.
+# ============================================================
+
+app_name           = "aws-amplify-reactjs"
+github_repository  = "https://github.com/YOUR_ORG/YOUR_REPO"
+github_oauth_token = "ghp_XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+app_domain_name    = "myapp.example.com"

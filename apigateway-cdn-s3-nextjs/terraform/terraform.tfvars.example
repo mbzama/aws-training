@@ -1,0 +1,26 @@
+# Copy this file to terraform.tfvars and fill in your values.
+# terraform.tfvars is git-ignored — never commit it.
+
+# AWS Configuration
+aws_region = "us-east-1"
+
+# Project Configuration
+environment  = "dev"
+project_name = "app"
+
+# DNS — set to your own domain
+domain_name        = "app.example.com"       # e.g. myapp.example.com
+certificate_domain = "example.com"           # primary domain on the ACM cert (e.g. *.example.com)
+
+# S3 Configuration
+s3_bucket_versioning = true
+
+# CloudFront Configuration
+cloudfront_price_class = "PriceClass_100"  # PriceClass_100 (cheapest), PriceClass_200, PriceClass_All
+cf_default_ttl        = 3600               # 1 hour
+cf_max_ttl            = 86400              # 24 hours
+cf_min_ttl            = 0
+
+# S3 documents
+index_document = "index.html"
+error_document = "404.html"

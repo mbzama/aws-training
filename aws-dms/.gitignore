@@ -1,0 +1,14 @@
+# Terraform state — contains credentials, account IDs, and resource ARNs
+terraform.tfstate
+terraform.tfstate.backup
+.terraform/
+*.tfvars
+*.tfvars.json
+
+# Python virtual environment
+.venv/
+__pycache__/
+*.pyc
+
+# OS
+.DS_Store

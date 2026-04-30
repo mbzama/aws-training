@@ -1,0 +1,17 @@
+# Layout Applications Registry
+# Defines the layout shells available for route composition.
+# Each remote app's route specifies which layout wraps it.
+
+layouts:
+  main:
+    name: main-layout
+    description: Standard layout with header and navigation
+    lifecycle: src/apps/layout-app/layouts/main-layout/lifecycles/index.ts
+    components:
+      header: src/apps/layout-app/layouts/main-layout/components/Header
+      nav: src/apps/layout-app/layouts/main-layout/components/Nav
+
+  empty:
+    name: empty-layout
+    description: Bare layout with no chrome (for auth/error pages)
+    lifecycle: src/apps/layout-app/layouts/empty-layout/lifecycles/index.ts

@@ -1,0 +1,11 @@
+# Copy this file to terraform.tfvars and fill in your values.
+# terraform.tfvars is git-ignored — never commit it.
+
+aws_region       = "us-east-1"
+bucket_name      = "<your-account-id>-fed-module-demo"   # e.g. 123456789012-fed-module-demo
+alternate_domain = "myapp.example.com"
+environment      = "production"
+
+# ACM certificate must exist in us-east-1 (required by CloudFront).
+# Run: aws acm list-certificates --region us-east-1
+acm_certificate_arn = "arn:aws:acm:us-east-1:<your-account-id>:certificate/<cert-uuid>"

@@ -1,0 +1,90 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "aws-secrets-app.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aws-secrets-app.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "aws-secrets-app.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "aws-secrets-app.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "aws-secrets-app.serviceAccountName" . }}
+
+      volumes:
+        - name: aws-secrets
+          emptyDir: {}
+
+      # ── Init: fetch secret from AWS Secrets Manager ──────────────────────────
+      initContainers:
+        - name: secrets-init
+          image: {{ .Values.initContainer.image }}
+          entrypoint: ["/bin/sh", "-c"]
+          args:
+            - >-
+              aws secretsmanager get-secret-value
+              --secret-id {{ .Values.aws.secretName | quote }}
+              --query SecretString
+              --output text
+              > /mnt/aws-secrets/app_web.json &&
+              echo "Secret written to /mnt/aws-secrets/app_web.json"
+          env:
+            - name: AWS_REGION
+              value: {{ .Values.aws.region | quote }}
+            {{- if not .Values.aws.irsaRoleArn }}
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "aws-secrets-app.fullname" . }}-aws-creds
+                  key: AWS_ACCESS_KEY_ID
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "aws-secrets-app.fullname" . }}-aws-creds
+                  key: AWS_SECRET_ACCESS_KEY
+            {{- if .Values.awsCredentials.sessionToken }}
+            - name: AWS_SESSION_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "aws-secrets-app.fullname" . }}-aws-creds
+                  key: AWS_SESSION_TOKEN
+            {{- end }}
+            {{- end }}
+          volumeMounts:
+            - name: aws-secrets
+              mountPath: /mnt/aws-secrets
+
+      # ── Main: Next.js app ─────────────────────────────────────────────────────
+      containers:
+        - name: web
+          image: {{ .Values.image.repository }}:{{ .Values.image.tag }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: 3000
+          env:
+            - name: AWS_REGION
+              value: {{ .Values.aws.region | quote }}
+          volumeMounts:
+            - name: aws-secrets
+              mountPath: /mnt/aws-secrets
+              readOnly: true
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 15
+            periodSeconds: 20
