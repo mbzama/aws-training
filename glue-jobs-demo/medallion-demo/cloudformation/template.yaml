@@ -36,9 +36,9 @@ Parameters:
 
   NumberOfWorkers:
     Type: Number
-    Default: 3
+    Default: 2
     MinValue: 2
-    Description: Number of Glue workers per job
+    Description: Number of Glue workers per job (2 = minimum; keeps each job at 2 DPU within the 4 DPU total limit)
 
   JobTimeoutMinutes:
     Type: Number
@@ -60,15 +60,15 @@ Parameters:
 
   PrivateSubnet1Cidr:
     Type: String
-    Default: 10.0.10.0/24
+    Default: 10.0.10.0/31
 
   PrivateSubnet2Cidr:
     Type: String
-    Default: 10.0.11.0/24
+    Default: 10.0.11.0/31
 
   PrivateSubnet3Cidr:
     Type: String
-    Default: 10.0.12.0/24
+    Default: 10.0.12.0/31
 
 # ============================================================
 # PARAMETER GROUPING (Console UI)
@@ -553,6 +553,8 @@ Resources:
       WorkerType: !Ref WorkerType
       NumberOfWorkers: !Ref NumberOfWorkers
       Timeout: !Ref JobTimeoutMinutes
+      ExecutionProperty:
+        MaxConcurrentRuns: 1
       Connections:
         Connections:
           - !Ref GlueNetworkConnection1
@@ -587,6 +589,8 @@ Resources:
       WorkerType: !Ref WorkerType
       NumberOfWorkers: !Ref NumberOfWorkers
       Timeout: !Ref JobTimeoutMinutes
+      ExecutionProperty:
+        MaxConcurrentRuns: 1
       Connections:
         Connections:
           - !Ref GlueNetworkConnection2
@@ -619,6 +623,8 @@ Resources:
       WorkerType: !Ref WorkerType
       NumberOfWorkers: !Ref NumberOfWorkers
       Timeout: !Ref JobTimeoutMinutes
+      ExecutionProperty:
+        MaxConcurrentRuns: 1
       Connections:
         Connections:
           - !Ref GlueNetworkConnection3

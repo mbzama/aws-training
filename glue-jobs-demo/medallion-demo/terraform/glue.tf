@@ -38,6 +38,10 @@ resource "aws_glue_job" "bronze" {
   number_of_workers = var.number_of_workers
   timeout           = var.job_timeout_minutes
 
+  execution_property {
+    max_concurrent_runs = 1
+  }
+
   tags = local.common_tags
 
   depends_on = [aws_s3_object.bronze_script]
@@ -63,6 +67,10 @@ resource "aws_glue_job" "silver" {
   number_of_workers = var.number_of_workers
   timeout           = var.job_timeout_minutes
 
+  execution_property {
+    max_concurrent_runs = 1
+  }
+
   tags = local.common_tags
 
   depends_on = [aws_s3_object.silver_script]
@@ -87,6 +95,10 @@ resource "aws_glue_job" "gold" {
   worker_type       = var.worker_type
   number_of_workers = var.number_of_workers
   timeout           = var.job_timeout_minutes
+
+  execution_property {
+    max_concurrent_runs = 1
+  }
 
   tags = local.common_tags
 

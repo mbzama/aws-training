@@ -39,9 +39,9 @@ variable "worker_type" {
 }
 
 variable "number_of_workers" {
-  description = "Number of Glue workers; G.1X × 3 workers = 3 DPU max"
+  description = "Number of Glue workers; G.1X × 2 workers = 2 DPU (fits within 4 DPU total limit)"
   type        = number
-  default     = 3
+  default     = 2
 
   validation {
     condition     = var.number_of_workers >= 2
@@ -77,7 +77,7 @@ variable "public_subnet_cidrs" {
 variable "private_subnet_cidrs" {
   description = "CIDR blocks for the three private subnets (must be within vpc_cidr)"
   type        = list(string)
-  default     = ["10.0.10.0/24", "10.0.11.0/24", "10.0.12.0/24"]
+  default     = ["10.0.10.0/31", "10.0.11.0/31", "10.0.12.0/31"]
 
   validation {
     condition     = length(var.private_subnet_cidrs) == 3
