@@ -553,8 +553,6 @@ Resources:
       WorkerType: !Ref WorkerType
       NumberOfWorkers: !Ref NumberOfWorkers
       Timeout: !Ref JobTimeoutMinutes
-      ExecutionProperty:
-        MaxConcurrentRuns: 1
       Connections:
         Connections:
           - !Ref GlueNetworkConnection1
@@ -589,8 +587,6 @@ Resources:
       WorkerType: !Ref WorkerType
       NumberOfWorkers: !Ref NumberOfWorkers
       Timeout: !Ref JobTimeoutMinutes
-      ExecutionProperty:
-        MaxConcurrentRuns: 1
       Connections:
         Connections:
           - !Ref GlueNetworkConnection2
@@ -623,8 +619,6 @@ Resources:
       WorkerType: !Ref WorkerType
       NumberOfWorkers: !Ref NumberOfWorkers
       Timeout: !Ref JobTimeoutMinutes
-      ExecutionProperty:
-        MaxConcurrentRuns: 1
       Connections:
         Connections:
           - !Ref GlueNetworkConnection3

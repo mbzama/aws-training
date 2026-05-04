@@ -1,0 +1,24 @@
+# Copy this to terraform.tfvars and fill in your values.
+# terraform.tfvars is gitignored — never commit it.
+
+aws_region          = "us-east-1"
+name_prefix         = "dev-workstation"
+instance_type       = "t4g.large"
+
+vpc_id    = "vpc-xxxxxxxxxxxxxxxxx"
+subnet_id = "subnet-xxxxxxxxxxxxxxxxx"
+
+# Restrict to your IP for security: ["1.2.3.4/32"]
+allowed_cidr_blocks = ["0.0.0.0/0"]
+
+public_key_path     = "~/.ssh/id_rsa.pub"
+rdp_password        = "ChangeMe123!"   # min 8 chars, used for RDP login as 'ubuntu'
+
+root_volume_size_gb = 50
+create_eip          = true
+
+tags = {
+  Project   = "dev-workstation"
+  ManagedBy = "terraform"
+  Owner     = "your-name"
+}

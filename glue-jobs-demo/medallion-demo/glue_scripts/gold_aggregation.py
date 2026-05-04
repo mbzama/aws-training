@@ -8,6 +8,7 @@ Reads cleaned Parquet from silver/orders/ and produces four analytical tables:
   gold/category_metrics/   - Revenue, order count, and share-of-revenue per category
 """
 import sys
+import socket
 from datetime import datetime
 from awsglue.utils import getResolvedOptions
 from pyspark.context import SparkContext
@@ -22,6 +23,31 @@ glueContext = GlueContext(sc)
 spark = glueContext.spark_session
 job = Job(glueContext)
 job.init(args["JOB_NAME"], args)
+
+
+def log_network_info(sc, job_name):
+    import time
+    driver_ip = socket.gethostbyname(socket.gethostname())
+    slots = sc.defaultParallelism
+
+    def probe(_):
+        time.sleep(1)
+        return [socket.gethostbyname(socket.gethostname())]
+
+    executor_ips = sorted(set(
+        sc.range(slots, numSlices=slots)
+          .mapPartitions(probe)
+          .collect()
+    ))
+    all_ips = sorted(set([driver_ip] + executor_ips))
+    subnets = sorted(set(".".join(ip.split(".")[:3]) + ".0/28" for ip in all_ips))
+    print(f"[NETWORK] job={job_name} driver_ip={driver_ip}")
+    print(f"[NETWORK] executor_ips={executor_ips}")
+    print(f"[NETWORK] all_ips={all_ips}")
+    print(f"[NETWORK] subnets_in_use={subnets}")
+
+
+log_network_info(sc, args["JOB_NAME"])
 
 BUCKET = args["S3_BUCKET"]
 
