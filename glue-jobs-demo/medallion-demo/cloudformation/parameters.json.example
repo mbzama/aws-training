@@ -1,0 +1,54 @@
+[
+  {
+    "ParameterKey": "ProjectName",
+    "ParameterValue": "medallion-demo"
+  },
+  {
+    "ParameterKey": "BucketSuffix",
+    "ParameterValue": "123456789012"
+  },
+  {
+    "ParameterKey": "Environment",
+    "ParameterValue": "dev"
+  },
+  {
+    "ParameterKey": "GlueVersion",
+    "ParameterValue": "4.0"
+  },
+  {
+    "ParameterKey": "WorkerType",
+    "ParameterValue": "G.1X"
+  },
+  {
+    "ParameterKey": "NumberOfWorkers",
+    "ParameterValue": "3"
+  },
+  {
+    "ParameterKey": "JobTimeoutMinutes",
+    "ParameterValue": "60"
+  },
+  {
+    "ParameterKey": "VpcCidr",
+    "ParameterValue": "10.0.0.0/16"
+  },
+  {
+    "ParameterKey": "PublicSubnet1Cidr",
+    "ParameterValue": "10.0.1.0/24"
+  },
+  {
+    "ParameterKey": "PublicSubnet2Cidr",
+    "ParameterValue": "10.0.2.0/24"
+  },
+  {
+    "ParameterKey": "PrivateSubnet1Cidr",
+    "ParameterValue": "10.0.10.0/24"
+  },
+  {
+    "ParameterKey": "PrivateSubnet2Cidr",
+    "ParameterValue": "10.0.11.0/24"
+  },
+  {
+    "ParameterKey": "PrivateSubnet3Cidr",
+    "ParameterValue": "10.0.12.0/24"
+  }
+]

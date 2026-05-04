@@ -42,3 +42,36 @@ output "run_workflow_command" {
   description = "AWS CLI command to start the full medallion pipeline"
   value       = "aws glue start-workflow-run --name ${aws_glue_workflow.medallion.name} --region ${var.aws_region}"
 }
+
+output "vpc_id" {
+  description = "ID of the project VPC"
+  value       = aws_vpc.main.id
+}
+
+output "public_subnet_ids" {
+  description = "IDs of the two public subnets"
+  value       = aws_subnet.public[*].id
+}
+
+output "private_subnet_ids" {
+  description = "IDs of the three private subnets (used by Glue jobs)"
+  value       = aws_subnet.private[*].id
+}
+
+output "glue_security_group_id" {
+  description = "ID of the security group attached to Glue workers"
+  value       = aws_security_group.glue.id
+}
+
+output "glue_connection_names" {
+  description = "Glue network connection names mapped to their private subnet"
+  value = {
+    for i, c in aws_glue_connection.network :
+    c.name => aws_subnet.private[i].cidr_block
+  }
+}
+
+output "nat_gateway_public_ip" {
+  description = "Public IP of the NAT Gateway (egress IP for private subnet traffic)"
+  value       = aws_eip.nat.public_ip
+}

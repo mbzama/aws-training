@@ -19,6 +19,13 @@ resource "aws_glue_job" "bronze" {
   description  = "Generates 1,000 sample e-commerce records and writes raw JSON to S3 bronze layer"
   role_arn     = aws_iam_role.glue.arn
   glue_version = var.glue_version
+  # All three private-subnet connections listed so Glue can spread workers
+  # across subnets when many parallel runs are active, avoiding IP exhaustion.
+  connections = [
+    aws_glue_connection.network[0].name,
+    aws_glue_connection.network[1].name,
+    aws_glue_connection.network[2].name,
+  ]
 
   command {
     name            = "glueetl"
@@ -43,6 +50,7 @@ resource "aws_glue_job" "silver" {
   description  = "Deduplicates, standardises, and type-casts bronze data; writes Parquet to silver layer"
   role_arn     = aws_iam_role.glue.arn
   glue_version = var.glue_version
+  connections  = [aws_glue_connection.network[1].name]
 
   command {
     name            = "glueetl"
@@ -67,6 +75,7 @@ resource "aws_glue_job" "gold" {
   description  = "Produces four analytical tables (daily sales, customer LTV, product perf, category) from silver layer"
   role_arn     = aws_iam_role.glue.arn
   glue_version = var.glue_version
+  connections  = [aws_glue_connection.network[2].name]
 
   command {
     name            = "glueetl"
