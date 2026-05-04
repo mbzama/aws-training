@@ -77,7 +77,7 @@ variable "public_subnet_cidrs" {
 variable "private_subnet_cidrs" {
   description = "CIDR blocks for the three private subnets (must be within vpc_cidr)"
   type        = list(string)
-  default     = ["10.0.10.0/31", "10.0.11.0/31", "10.0.12.0/31"]
+  default     = ["10.0.10.0/28", "10.0.11.0/28", "10.0.12.0/28"]
 
   validation {
     condition     = length(var.private_subnet_cidrs) == 3
