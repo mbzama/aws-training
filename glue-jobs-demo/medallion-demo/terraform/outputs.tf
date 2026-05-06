@@ -75,3 +75,13 @@ output "nat_gateway_public_ip" {
   description = "Public IP of the NAT Gateway (egress IP for private subnet traffic)"
   value       = aws_eip.nat.public_ip
 }
+
+output "lambda_ip_waiter_arn" {
+  description = "ARN of the IP-exhaustion test Lambda"
+  value       = aws_lambda_function.ip_waiter.arn
+}
+
+output "invoke_ip_waiter_command" {
+  description = "CLI command to fire one async Lambda invocation (holds an ENI for WAIT_SECONDS)"
+  value       = "aws lambda invoke --function-name ${aws_lambda_function.ip_waiter.function_name} --invocation-type Event --region ${var.aws_region} response.json"
+}

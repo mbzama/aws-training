@@ -55,6 +55,19 @@ variable "job_timeout_minutes" {
   default     = 60
 }
 
+# ── Lambda IP-exhaustion tester ───────────────────────────────────────────────
+
+variable "lambda_wait_seconds" {
+  description = "Seconds the IP-waiter Lambda sleeps per invocation (holds the ENI that long)"
+  type        = number
+  default     = 300
+
+  validation {
+    condition     = var.lambda_wait_seconds >= 1 && var.lambda_wait_seconds <= 870
+    error_message = "lambda_wait_seconds must be 1–870 (Lambda max timeout is 900s; 30s headroom is added)."
+  }
+}
+
 # ── Networking ────────────────────────────────────────────────────────────────
 
 variable "vpc_cidr" {
@@ -66,7 +79,7 @@ variable "vpc_cidr" {
 variable "public_subnet_cidrs" {
   description = "CIDR blocks for the two public subnets (must be within vpc_cidr)"
   type        = list(string)
-  default     = ["10.0.1.0/24", "10.0.2.0/24"]
+  default     = ["10.0.1.0/28", "10.0.2.0/28"]
 
   validation {
     condition     = length(var.public_subnet_cidrs) == 2
