@@ -260,6 +260,93 @@ Or open the AWS Glue console → **Workflows** → click the workflow → **Run 
 
 ---
 
+## Run jobs individually
+
+Use these commands to trigger a single Glue job outside of the workflow, or to re-run a specific layer after a failure.
+
+```bash
+# Bronze — generates 1,050 raw JSON records → s3://<bucket>/bronze/orders/
+aws glue start-job-run \
+  --job-name medallion-demo-bronze-ingestion \
+  --region us-east-1
+
+# Silver — cleans, deduplicates, types → s3://<bucket>/silver/orders/
+aws glue start-job-run \
+  --job-name medallion-demo-silver-transformation \
+  --region us-east-1
+
+# Gold — 4 aggregation tables → s3://<bucket>/gold/
+aws glue start-job-run \
+  --job-name medallion-demo-gold-aggregation \
+  --region us-east-1
+```
+
+Check the status of the most recent run for a job:
+
+```bash
+aws glue get-job-runs \
+  --job-name medallion-demo-bronze-ingestion \
+  --region us-east-1 \
+  --query "JobRuns[0].{State:JobRunState,Start:StartedOn,Error:ErrorMessage}"
+```
+
+View `[NETWORK]` log lines (subnet ID, subnet name, and assigned IP for every worker) for a specific run — replace `<run-id>` with the ID returned by `start-job-run`:
+
+```bash
+aws logs filter-log-events \
+  --log-group-name /aws-glue/jobs/output \
+  --log-stream-name-prefix "<run-id>" \
+  --filter-pattern "[NETWORK]" \
+  --region us-east-1
+```
+
+---
+
+## Lambda IP waiter
+
+The `medallion-demo-ip-waiter` Lambda is an IP-exhaustion test tool. Each invocation attaches an ENI to `private-1` and holds it for `WAIT_SECONDS` (default 300 s). Invoke it concurrently alongside a Bronze Glue run to simulate subnet IP exhaustion.
+
+**Single async invocation** (fires and returns immediately; Lambda holds the ENI in the background):
+
+```bash
+aws lambda invoke \
+  --function-name medallion-demo-ip-waiter \
+  --invocation-type Event \
+  --region us-east-1 \
+  response.json
+```
+
+**Synchronous invocation** (blocks until the sleep finishes):
+
+```bash
+aws lambda invoke \
+  --function-name medallion-demo-ip-waiter \
+  --invocation-type RequestResponse \
+  --region us-east-1 \
+  response.json
+```
+
+**Multiple concurrent invocations** (Windows — use the included batch script to fire N invocations at once):
+
+```cmd
+invoke_ip_waiter.bat
+```
+
+The script prompts for a count, fires that many async invocations, then prints the command to trigger the Bronze job so you can observe the IP-exhaustion error.
+
+**View the network log line in CloudWatch** (shows the assigned IP, subnet ID, and subnet name):
+
+```bash
+aws logs filter-log-events \
+  --log-group-name /aws/lambda/medallion-demo-ip-waiter \
+  --filter-pattern "[NETWORK]" \
+  --region us-east-1
+```
+
+> **Tip:** `terraform output invoke_ip_waiter_command` prints the ready-to-run invocation command with your resolved function name and region.
+
+---
+
 ## Verify output in S3
 
 ```bash
