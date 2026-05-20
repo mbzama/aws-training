@@ -14,7 +14,7 @@ output "ec2_instance_id" {
 }
 
 output "ec2_public_ip" {
-  description = "EC2 Public IP (SSH access)"
+  description = "EC2 Public IP"
   value       = aws_instance.main.public_ip
 }
 
@@ -28,9 +28,9 @@ output "rds_port" {
   value       = aws_db_instance.mysql.port
 }
 
-output "ssh_command" {
-  description = "SSH command to connect to EC2"
-  value       = "ssh -i <your-key>.pem ec2-user@${aws_instance.main.public_ip}"
+output "ec2_connect_instructions" {
+  description = "How to connect to the EC2 instance"
+  value       = "Use AWS Console EC2 Connect feature for instance ID ${aws_instance.main.id}. No SSH key needed."
 }
 
 output "mysql_connect_command" {

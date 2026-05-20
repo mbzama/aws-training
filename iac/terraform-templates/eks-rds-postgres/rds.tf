@@ -59,7 +59,7 @@ resource "aws_security_group" "rds" {
 # RDS Parameter Group
 resource "aws_db_parameter_group" "main" {
   name   = "${var.cluster_name}-db-params"
-  family = var.db_engine == "postgres" ? "postgres16" : "mysql8.0"
+  family = var.db_engine == "postgres" ? "postgres16" : "mysql8.4"
 
   tags = {
     Name        = "${var.cluster_name}-db-params"

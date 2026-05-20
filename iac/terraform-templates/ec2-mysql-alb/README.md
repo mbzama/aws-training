@@ -17,7 +17,7 @@ Internet → ALB (port 80) → EC2 (port 80) → RDS MySQL (port 3306)
 ## What It Creates
 
 - EC2 instance (AL2023, Apache HTTPD, SSH via key pair)
-- RDS MySQL 8.0 (private, single-AZ, gp3 storage)
+- RDS MySQL 8.4.8 (private, single-AZ, gp3 storage)
 - Application Load Balancer with HTTP listener
 - Secrets Manager secret with the auto-generated RDS password
 - Security groups with proper isolation between tiers

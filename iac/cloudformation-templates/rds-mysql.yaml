@@ -65,11 +65,9 @@ Parameters:
 
   MySQLVersion:
     Type: String
-    Default: '8.0'
+    Default: '8.4.8'
     AllowedValues:
-      - '8.0'
-      - '8.4'
-      - '5.7'
+      - '8.4.8'
     Description: MySQL engine version.
 
   DBName:

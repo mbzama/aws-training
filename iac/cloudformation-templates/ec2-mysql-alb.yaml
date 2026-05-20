@@ -4,6 +4,7 @@ Description: >
 
   Deploy in us-east-1 or us-west-2 only.
   Default VPC and subnets are auto-detected at deploy time.
+  Connect via EC2 Instance Connect (no key pair required).
 
 # ---------------------------------------------------------------
 # Sandbox Limits:
@@ -18,7 +19,6 @@ Metadata:
       - Label:
           default: EC2
         Parameters:
-          - KeyPairName
           - EC2InstanceType
       - Label:
           default: RDS
@@ -27,8 +27,6 @@ Metadata:
           - DBUsername
           - DBName
     ParameterLabels:
-      KeyPairName:
-        default: EC2 Key Pair (for SSH)
       EC2InstanceType:
         default: EC2 Instance Type
       DBInstanceClass:
@@ -39,10 +37,6 @@ Metadata:
         default: Initial Database Name
 
 Parameters:
-  KeyPairName:
-    Type: AWS::EC2::KeyPair::KeyName
-    Description: EC2 Key Pair for SSH access (must already exist in your account).
-
   EC2InstanceType:
     Type: String
     Default: t3.medium
@@ -197,7 +191,7 @@ Resources:
   EC2SecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: EC2 - allow HTTP from ALB and SSH from internet
+      GroupDescription: EC2 - allow HTTP from ALB and SSH for EC2 Instance Connect
       VpcId: !GetAtt DefaultVpcLookup.VpcId
       SecurityGroupIngress:
         - Description: HTTP from ALB only
@@ -205,7 +199,7 @@ Resources:
           FromPort: 80
           ToPort: 80
           SourceSecurityGroupId: !Ref ALBSecurityGroup
-        - Description: SSH from internet (restrict to your IP in production)
+        - Description: SSH for EC2 Instance Connect
           IpProtocol: tcp
           FromPort: 22
           ToPort: 22
@@ -231,6 +225,8 @@ Resources:
 
   # ---------------------------------------------------------------
   # EC2 Instance
+  # No key pair — connect via EC2 Instance Connect from the AWS Console.
+  # ec2-instance-connect is pre-installed on Amazon Linux 2023.
   # ---------------------------------------------------------------
 
   EC2Instance:
@@ -238,7 +234,6 @@ Resources:
     Properties:
       InstanceType: !Ref EC2InstanceType
       ImageId: !Sub '{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64}}'
-      KeyName: !Ref KeyPairName
       Tenancy: default
       SecurityGroupIds:
         - !Ref EC2SecurityGroup
@@ -299,7 +294,7 @@ Resources:
       DBInstanceIdentifier: !Sub 'mysql-${DefaultVpcLookup.Suffix}'
       DBInstanceClass: !Ref DBInstanceClass
       Engine: mysql
-      EngineVersion: '8.0.35'
+      EngineVersion: '8.4.8'
       MasterUsername: !Ref DBUsername
       MasterUserPassword: !Sub '{{resolve:secretsmanager:${RDSMasterSecret}:SecretString:}}'
       DBName: !Ref DBName
@@ -389,10 +384,14 @@ Outputs:
       Name: !Sub '${AWS::StackName}-ec2-id'
 
   EC2PublicIP:
-    Description: EC2 Public IP (SSH access)
+    Description: EC2 Public IP
     Value: !GetAtt EC2Instance.PublicIp
     Export:
       Name: !Sub '${AWS::StackName}-ec2-ip'
+
+  EC2ConnectURL:
+    Description: EC2 Instance Connect - open in AWS Console
+    Value: !Sub 'https://console.aws.amazon.com/ec2/v2/home?region=${AWS::Region}#Instances:instanceId=${EC2Instance}'
 
   RDSEndpoint:
     Description: RDS MySQL endpoint (connect from EC2 using mysql client)
@@ -405,10 +404,6 @@ Outputs:
     Value: !GetAtt RDSInstance.Endpoint.Port
     Export:
       Name: !Sub '${AWS::StackName}-rds-port'
-
-  SSHCommand:
-    Description: SSH command to connect to EC2
-    Value: !Sub 'ssh -i <your-key>.pem ec2-user@${EC2Instance.PublicIp}'
 
   MySQLConnectCommand:
     Description: MySQL connect command (run from EC2; password in Secrets Manager)

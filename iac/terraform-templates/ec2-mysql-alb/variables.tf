@@ -10,11 +10,6 @@ variable "name_prefix" {
   default     = "ec2-mysql-alb"
 }
 
-variable "key_pair_name" {
-  description = "EC2 Key Pair name for SSH access (must already exist in your account)"
-  type        = string
-}
-
 variable "ec2_instance_type" {
   description = "EC2 instance type. Allowed: t2/t3/t3a micro|small|medium"
   type        = string

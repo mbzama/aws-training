@@ -36,11 +36,11 @@ variable "db_instance_class" {
 variable "mysql_version" {
   description = "MySQL engine version"
   type        = string
-  default     = "8.0"
+  default     = "8.4.8"
 
   validation {
-    condition     = contains(["8.0", "8.4", "5.7"], var.mysql_version)
-    error_message = "Allowed values: 8.0, 8.4, 5.7."
+    condition     = var.mysql_version == "8.4.8"
+    error_message = "Only MySQL 8.4.8 is supported."
   }
 }
 

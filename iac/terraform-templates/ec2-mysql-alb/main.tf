@@ -42,6 +42,31 @@ resource "aws_secretsmanager_secret_version" "rds_master" {
   secret_string = jsonencode({ password = random_password.db_master.result })
 }
 
+# IAM Role for EC2 Instance Connect (allows AWS Console browser-based SSH)
+resource "aws_iam_role" "ec2_instance_connect" {
+  name        = "${var.name_prefix}-ec2-connect-role"
+  description = "Allows EC2 Instance Connect access via AWS Console"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "ec2.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "ec2_instance_connect" {
+  role       = aws_iam_role.ec2_instance_connect.name
+  policy_arn = "arn:aws:iam::aws:policy/EC2InstanceConnect"
+}
+
+resource "aws_iam_instance_profile" "ec2" {
+  name = "${var.name_prefix}-ec2-profile"
+  role = aws_iam_role.ec2_instance_connect.name
+}
+
 # Security Groups
 resource "aws_security_group" "alb" {
   name        = "${var.name_prefix}-alb-sg"
@@ -70,7 +95,7 @@ resource "aws_security_group" "alb" {
 
 resource "aws_security_group" "ec2" {
   name        = "${var.name_prefix}-ec2-sg"
-  description = "EC2 - allow HTTP from ALB and SSH from internet"
+  description = "EC2 - allow HTTP from ALB and EC2 Instance Connect"
   vpc_id      = data.aws_vpc.default.id
 
   ingress {
@@ -82,7 +107,7 @@ resource "aws_security_group" "ec2" {
   }
 
   ingress {
-    description = "SSH from internet (restrict to your IP in production)"
+    description = "EC2 Instance Connect (AWS console access)"
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
@@ -126,11 +151,11 @@ resource "aws_security_group" "rds" {
   }
 }
 
-# EC2 Instance
+# EC2 Instance — connect via EC2 Instance Connect, no key pair required
 resource "aws_instance" "main" {
   ami                    = data.aws_ssm_parameter.al2023_ami.value
   instance_type          = var.ec2_instance_type
-  key_name               = var.key_pair_name
+  iam_instance_profile   = aws_iam_instance_profile.ec2.name
   subnet_id              = sort(data.aws_subnets.default.ids)[0]
   vpc_security_group_ids = [aws_security_group.ec2.id]
   tenancy                = "default"
@@ -186,7 +211,7 @@ resource "aws_db_subnet_group" "main" {
 resource "aws_db_instance" "mysql" {
   identifier     = "${var.name_prefix}-mysql"
   engine         = "mysql"
-  engine_version = "8.0.35"
+  engine_version = "8.4.8"
   instance_class = var.db_instance_class
 
   db_name  = var.db_name

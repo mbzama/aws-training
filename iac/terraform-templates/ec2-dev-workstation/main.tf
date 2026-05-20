@@ -32,18 +32,13 @@ data "aws_ami" "ubuntu_22_arm64" {
   }
 }
 
-resource "aws_key_pair" "workstation" {
-  key_name   = "${var.name_prefix}-key"
-  public_key = file(var.public_key_path)
-}
-
 resource "aws_security_group" "workstation" {
   name        = "${var.name_prefix}-sg"
   description = "Dev workstation access"
   vpc_id      = var.vpc_id
 
   ingress {
-    description = "SSH"
+    description = "SSH for EC2 Instance Connect"
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
@@ -88,6 +83,11 @@ resource "aws_iam_role_policy_attachment" "ssm" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
+resource "aws_iam_role_policy_attachment" "ec2_instance_connect" {
+  role       = aws_iam_role.workstation.name
+  policy_arn = "arn:aws:iam::aws:policy/EC2InstanceConnect"
+}
+
 resource "aws_iam_instance_profile" "workstation" {
   name = "${var.name_prefix}-profile"
   role = aws_iam_role.workstation.name
@@ -96,7 +96,6 @@ resource "aws_iam_instance_profile" "workstation" {
 resource "aws_instance" "workstation" {
   ami                    = data.aws_ami.ubuntu_22_arm64.id
   instance_type          = var.instance_type
-  key_name               = aws_key_pair.workstation.key_name
   vpc_security_group_ids = [aws_security_group.workstation.id]
   subnet_id              = var.subnet_id
   iam_instance_profile   = aws_iam_instance_profile.workstation.name

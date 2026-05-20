@@ -126,7 +126,7 @@ Supported versions: 16.x, 15.x, 14.x, 13.x
 
 ```hcl
 db_engine         = "mysql"
-db_engine_version = "8.0.35"
+db_engine_version = "8.4.8"
 ```
 
 ## Management Commands
@@ -186,7 +186,7 @@ To switch from PostgreSQL to MySQL:
 2. Update variables:
    ```hcl
    db_engine         = "mysql"
-   db_engine_version = "8.0.35"
+   db_engine_version = "8.4.8"
    ```
 3. Run `terraform destroy -target=aws_db_instance.main`
 4. Run `terraform apply`

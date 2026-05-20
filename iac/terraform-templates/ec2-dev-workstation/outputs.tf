@@ -18,9 +18,9 @@ output "ami_id" {
   value       = data.aws_ami.ubuntu_22_arm64.id
 }
 
-output "ssh_command" {
-  description = "SSH command to connect"
-  value       = "ssh -i ~/.ssh/id_rsa ubuntu@${var.create_eip ? aws_eip.workstation[0].public_ip : aws_instance.workstation.public_ip}"
+output "ec2_connect_instructions" {
+  description = "How to connect to the workstation"
+  value       = "Use AWS Console EC2 Instance Connect for instance ID ${aws_instance.workstation.id}, or run: aws ec2-instance-connect ssh --instance-id ${aws_instance.workstation.id} --os-user ubuntu"
 }
 
 output "rdp_connection" {

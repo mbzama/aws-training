@@ -43,7 +43,7 @@ subnet_ids = ["subnet-aaa", "subnet-bbb"]
 | `vpc_id` | `""` | VPC ID (empty = use default VPC) |
 | `subnet_ids` | `[]` | Subnet IDs (empty = use default VPC subnets) |
 | `db_instance_class` | `db.t3.micro` | Allowed: db.t3/t4g micro\|small\|medium |
-| `mysql_version` | `8.0` | MySQL version: 8.0, 8.4, or 5.7 |
+| `mysql_version` | `8.4.8` | MySQL version (8.4.8 only) |
 | `db_name` | `practicedb` | Initial database name |
 | `db_username` | `admin` | Master username |
 | `allocated_storage` | `20` | Storage in GB (20–50) |

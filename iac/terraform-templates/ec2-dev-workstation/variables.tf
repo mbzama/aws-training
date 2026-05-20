@@ -27,15 +27,9 @@ variable "subnet_id" {
 }
 
 variable "allowed_cidr_blocks" {
-  description = "CIDR blocks allowed to SSH and RDP into the workstation"
+  description = "CIDR blocks allowed to SSH (EC2 Instance Connect) and RDP into the workstation"
   type        = list(string)
   default     = ["0.0.0.0/0"] # Restrict this to your IP in production
-}
-
-variable "public_key_path" {
-  description = "Path to your SSH public key file"
-  type        = string
-  default     = "~/.ssh/id_rsa.pub"
 }
 
 variable "rdp_password" {
