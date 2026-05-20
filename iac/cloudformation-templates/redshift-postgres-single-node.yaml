@@ -1,0 +1,358 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Redshift Single-Node Cluster + PostgreSQL RDS using Default VPC.
+
+  Deploy in us-east-1 or us-west-2 only.
+  Default VPC and subnets are auto-detected at deploy time.
+
+# ---------------------------------------------------------------
+# Sandbox Limits:
+#   Redshift : dc2.large or ra3.xlplus nodes | Single-node or small clusters
+#   ELB      : Fully supported (not used here)
+# ---------------------------------------------------------------
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Redshift Cluster
+        Parameters:
+          - NodeType
+          - DBUsername
+          - DBName
+      - Label:
+          default: PostgreSQL RDS
+        Parameters:
+          - PGDBName
+          - PGUsername
+    ParameterLabels:
+      NodeType:
+        default: Redshift Node Type
+      DBUsername:
+        default: Redshift Master Username
+      DBName:
+        default: Redshift Database Name
+      PGDBName:
+        default: PostgreSQL Database Name
+      PGUsername:
+        default: PostgreSQL Master Username
+
+Parameters:
+  NodeType:
+    Type: String
+    Default: ra3.large
+    AllowedValues:
+      - ra3.large
+    Description: Redshift node type.
+
+  DBName:
+    Type: String
+    Default: practicedb
+    MinLength: 1
+    MaxLength: 64
+    AllowedPattern: '[a-z][a-z0-9_]*'
+    Description: Name of the initial Redshift database (lowercase only).
+
+  DBUsername:
+    Type: String
+    Default: rsadmin
+    MinLength: 1
+    MaxLength: 128
+    AllowedPattern: '[a-z][a-z0-9_]*'
+    Description: >
+      Master username (lowercase only). Cannot be "admin", "user",
+      "root", "postgres", or other reserved words.
+
+  PGDBName:
+    Type: String
+    Default: pgpracticedb
+    MinLength: 1
+    MaxLength: 63
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9_]*'
+    Description: Name of the initial PostgreSQL database.
+
+  PGUsername:
+    Type: String
+    Default: pgadmin
+    MinLength: 1
+    MaxLength: 16
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9]*'
+    Description: PostgreSQL master username (cannot be "postgres" - reserved by AWS).
+
+Resources:
+
+  # ---------------------------------------------------------------
+  # Default VPC Lookup (Lambda Custom Resource)
+  # Queries AWS at deploy time for the default VPC and its subnets.
+  # ---------------------------------------------------------------
+
+  DefaultVpcLookupPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Allows Lambda to describe VPCs and subnets for default VPC lookup
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - ec2:DescribeVpcs
+              - ec2:DescribeSubnets
+            Resource: '*'
+
+  DefaultVpcLookupRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - !Ref DefaultVpcLookupPolicy
+
+  DefaultVpcLookupFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${AWS::StackName}-vpc-lookup'
+      Runtime: python3.12
+      Handler: index.handler
+      Role: !GetAtt DefaultVpcLookupRole.Arn
+      Timeout: 30
+      Code:
+        ZipFile: |
+          import boto3
+          import cfnresponse
+          import hashlib
+
+          def handler(event, context):
+              if event['RequestType'] == 'Delete':
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                  return
+              try:
+                  # Stable suffix derived from stack ID - consistent across stack updates
+                  suffix = hashlib.md5(event['StackId'].encode()).hexdigest()[:8]
+                  ec2 = boto3.client('ec2')
+                  vpcs = ec2.describe_vpcs(Filters=[{'Name': 'isDefault', 'Values': ['true']}])
+                  vpc_id = vpcs['Vpcs'][0]['VpcId']
+                  subnets = ec2.describe_subnets(Filters=[
+                      {'Name': 'vpc-id', 'Values': [vpc_id]},
+                      {'Name': 'defaultForAz', 'Values': ['true']}
+                  ])
+                  subnet_list = sorted(subnets['Subnets'], key=lambda s: s['SubnetId'])
+                  subnet_ids = [s['SubnetId'] for s in subnet_list]
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {
+                      'VpcId': vpc_id,
+                      'SubnetIds': ','.join(subnet_ids),
+                      'SubnetId0': subnet_ids[0],
+                      'SubnetAz0': subnet_list[0]['AvailabilityZone'],
+                      'Suffix': suffix
+                  })
+              except Exception as e:
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {'Error': str(e)})
+
+  DefaultVpcLookup:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken: !GetAtt DefaultVpcLookupFunction.Arn
+
+  # ---------------------------------------------------------------
+  # Secrets Manager - store credentials as secrets (dynamic references)
+  # ---------------------------------------------------------------
+
+  RedshiftMasterSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub '${AWS::StackName}-redshift-master'
+      Description: Redshift cluster master credentials
+      GenerateSecretString:
+        PasswordLength: 32
+        ExcludeCharacters: '"@/\\%'
+
+  PostgreSQLMasterSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub '${AWS::StackName}-postgres-master'
+      Description: PostgreSQL RDS master credentials
+      GenerateSecretString:
+        PasswordLength: 32
+        ExcludeCharacters: '"@/\\%'
+
+  # ---------------------------------------------------------------
+  # Security Groups
+  # ---------------------------------------------------------------
+
+  RedshiftSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Redshift - allow port 5439 inbound from within the VPC
+      VpcId: !GetAtt DefaultVpcLookup.VpcId
+      SecurityGroupIngress:
+        - Description: Redshift from within VPC (JDBC/ODBC clients, SQL tools)
+          IpProtocol: tcp
+          FromPort: 5439
+          ToPort: 5439
+          CidrIp: 0.0.0.0/0        # Open for sandbox; restrict to your IP in real use
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-redshift-sg'
+
+  PostgreSQLSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: PostgreSQL RDS - allow port 5432 from Redshift cluster only
+      VpcId: !GetAtt DefaultVpcLookup.VpcId
+      SecurityGroupIngress:
+        - Description: PostgreSQL from Redshift cluster
+          IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref RedshiftSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-postgres-sg'
+
+  # ---------------------------------------------------------------
+  # Redshift Subnet Group
+  # ---------------------------------------------------------------
+
+  RedshiftSubnetGroup:
+    Type: AWS::Redshift::ClusterSubnetGroup
+    Properties:
+      Description: !Sub 'Subnet group for ${AWS::StackName} Redshift cluster'
+      SubnetIds: !Split [',', !GetAtt DefaultVpcLookup.SubnetIds]
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-redshift-subnet-group'
+
+  # ---------------------------------------------------------------
+  # Redshift Single-Node Cluster
+  # ---------------------------------------------------------------
+
+  RedshiftCluster:
+    Type: AWS::Redshift::Cluster
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      ClusterIdentifier: !Sub 'redshift-${DefaultVpcLookup.Suffix}'
+      ClusterType: single-node          # Single-AZ by definition
+      NumberOfNodes: 1
+      NodeType: !Ref NodeType           # ra3.large
+      AvailabilityZone: us-east-1a
+      DBName: !Ref DBName
+      MasterUsername: !Ref DBUsername
+      MasterUserPassword: !Sub '{{resolve:secretsmanager:${RedshiftMasterSecret}:SecretString:}}'
+      VpcSecurityGroupIds:
+        - !Ref RedshiftSecurityGroup
+      ClusterSubnetGroupName: !Ref RedshiftSubnetGroup
+      PubliclyAccessible: true
+      Encrypted: true
+      AutomatedSnapshotRetentionPeriod: 1  # 1-day retention
+      AllowVersionUpgrade: true
+      PreferredMaintenanceWindow: 'sun:05:00-sun:06:00'
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-cluster'
+
+  # ---------------------------------------------------------------
+  # PostgreSQL RDS (db.t3.medium)
+  # Connected to Redshift via security group on port 5432
+  # ---------------------------------------------------------------
+
+  PostgreSQLSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: !Sub 'Subnet group for ${AWS::StackName} PostgreSQL RDS'
+      SubnetIds: !Split [',', !GetAtt DefaultVpcLookup.SubnetIds]
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-postgres-subnet-group'
+
+  PostgreSQLInstance:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      DBInstanceIdentifier: !Sub 'postgres-${DefaultVpcLookup.Suffix}'
+      DBInstanceClass: db.t3.medium
+      Engine: postgres
+      EngineVersion: '17.2'
+      MasterUsername: !Ref PGUsername
+      MasterUserPassword: !Sub '{{resolve:secretsmanager:${PostgreSQLMasterSecret}:SecretString:}}'
+      DBName: !Ref PGDBName
+      AllocatedStorage: '20'
+      MaxAllocatedStorage: 50
+      StorageType: gp3
+      StorageEncrypted: false
+      MultiAZ: false
+      PubliclyAccessible: false
+      VPCSecurityGroups:
+        - !Ref PostgreSQLSecurityGroup
+      DBSubnetGroupName: !Ref PostgreSQLSubnetGroup
+      BackupRetentionPeriod: 0        # Backups disabled for testing
+      DeletionProtection: false
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-postgres'
+
+# ---------------------------------------------------------------
+# Outputs
+# ---------------------------------------------------------------
+
+Outputs:
+
+  DefaultVpcId:
+    Description: Auto-detected default VPC ID
+    Value: !GetAtt DefaultVpcLookup.VpcId
+
+  ClusterEndpoint:
+    Description: Redshift cluster endpoint address
+    Value: !GetAtt RedshiftCluster.Endpoint.Address
+    Export:
+      Name: !Sub '${AWS::StackName}-endpoint'
+
+  ClusterPort:
+    Description: Redshift cluster port
+    Value: !GetAtt RedshiftCluster.Endpoint.Port
+    Export:
+      Name: !Sub '${AWS::StackName}-port'
+
+  ClusterJDBCURL:
+    Description: JDBC connection URL for SQL clients (e.g. DBeaver, SQL Workbench/J)
+    Value: !Sub 'jdbc:redshift://${RedshiftCluster.Endpoint.Address}:${RedshiftCluster.Endpoint.Port}/${DBName}'
+
+  PsqlConnectCommand:
+    Description: psql connect command (requires PostgreSQL client v8+ or Redshift driver)
+    Value: !Sub 'psql -h ${RedshiftCluster.Endpoint.Address} -p ${RedshiftCluster.Endpoint.Port} -U ${DBUsername} -d ${DBName}'
+
+  PostgreSQLEndpoint:
+    Description: PostgreSQL RDS endpoint (reachable from Redshift via port 5432)
+    Value: !GetAtt PostgreSQLInstance.Endpoint.Address
+    Export:
+      Name: !Sub '${AWS::StackName}-postgres-endpoint'
+
+  PostgreSQLPort:
+    Description: PostgreSQL RDS port
+    Value: !GetAtt PostgreSQLInstance.Endpoint.Port
+    Export:
+      Name: !Sub '${AWS::StackName}-postgres-port'
+
+  PostgreSQLConnectCommand:
+    Description: >
+      Connect to PostgreSQL from Redshift using CREATE EXTERNAL SCHEMA or dblink.
+      Run this psql command from a host that has network access to the RDS instance.
+    Value: !Sub 'psql -h ${PostgreSQLInstance.Endpoint.Address} -U ${PGUsername} -d ${PGDBName}'
+
+  RedshiftSecretArn:
+    Description: Secrets Manager ARN for Redshift master credentials
+    Value: !Ref RedshiftMasterSecret
+    Export:
+      Name: !Sub '${AWS::StackName}-redshift-secret-arn'
+
+  PostgreSQLSecretArn:
+    Description: Secrets Manager ARN for PostgreSQL master credentials
+    Value: !Ref PostgreSQLMasterSecret
+    Export:
+      Name: !Sub '${AWS::StackName}-postgres-secret-arn'

@@ -1,0 +1,194 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  RDS MySQL only.
+
+  Deploy in us-east-1 or us-west-2 only.
+
+# ---------------------------------------------------------------
+# Sandbox Limits:
+#   RDS: t3/t4g micro|small|medium | max 50 GB | no provisioned IOPS
+# ---------------------------------------------------------------
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Network
+        Parameters:
+          - VpcId
+          - SubnetIds
+      - Label:
+          default: RDS MySQL
+        Parameters:
+          - DBInstanceClass
+          - MySQLVersion
+          - DBName
+          - DBUsername
+          - AllocatedStorage
+    ParameterLabels:
+      VpcId:
+        default: Default VPC ID
+      SubnetIds:
+        default: Subnets (select at least 2 from your default VPC)
+      DBInstanceClass:
+        default: RDS Instance Class
+      MySQLVersion:
+        default: MySQL Version
+      DBName:
+        default: Initial Database Name
+      DBUsername:
+        default: Master Username
+      AllocatedStorage:
+        default: Storage Size (GB)
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: Select your default VPC.
+
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Select at least 2 subnets in different AZs from your default VPC.
+
+  DBInstanceClass:
+    Type: String
+    Default: db.t3.micro
+    # Allowed: t3 or t4g micro, small, medium
+    AllowedValues:
+      - db.t3.micro
+      - db.t3.small
+      - db.t3.medium
+      - db.t4g.micro
+      - db.t4g.small
+      - db.t4g.medium
+    Description: 'Allowed: db.t3/t4g micro|small|medium only.'
+
+  MySQLVersion:
+    Type: String
+    Default: '8.0'
+    AllowedValues:
+      - '8.0'
+      - '8.4'
+      - '5.7'
+    Description: MySQL engine version.
+
+  DBName:
+    Type: String
+    Default: practicedb
+    MinLength: 1
+    MaxLength: 64
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9_]*'
+    Description: Name of the initial MySQL database.
+
+  DBUsername:
+    Type: String
+    Default: admin
+    MinLength: 1
+    MaxLength: 16
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9_]*'
+    Description: Master username (cannot be "root").
+
+  AllocatedStorage:
+    Type: Number
+    Default: 20
+    MinValue: 20
+    MaxValue: 50                      # max 50 GB
+    Description: Storage in GB (20–50 GB).
+
+Resources:
+
+  # ---------------------------------------------------------------
+  # Secrets Manager - Auto-generated Master Password
+  # ---------------------------------------------------------------
+
+  RDSMasterSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Description: !Sub 'MySQL master password for ${AWS::StackName}'
+      GenerateSecretString:
+        PasswordLength: 32
+        ExcludeCharacters: '"@/\\%'
+
+  RDSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: RDS MySQL - allow port 3306 inbound
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - Description: MySQL from anywhere in the VPC
+          IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          CidrIp: 0.0.0.0/0          # Restrict to your EC2 SG or IP in production
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-rds-sg'
+
+  RDSSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: !Sub 'Subnet group for ${AWS::StackName} MySQL RDS'
+      SubnetIds: !Ref SubnetIds
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-subnet-group'
+
+  RDSMySQLInstance:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      DBInstanceIdentifier: !Sub '${AWS::StackName}-mysql'
+      DBInstanceClass: !Ref DBInstanceClass
+      Engine: mysql
+      EngineVersion: !Ref MySQLVersion
+      MasterUsername: !Ref DBUsername
+      MasterUserPassword: !Sub '{{resolve:secretsmanager:${RDSMasterSecret}:SecretString:}}'
+      DBName: !Ref DBName
+      AllocatedStorage: !Ref AllocatedStorage
+      MaxAllocatedStorage: 50         # Auto-scaling cap = 50 GB
+      StorageType: gp3                # gp3 — NO provisioned IOPS
+      StorageEncrypted: false
+      MultiAZ: false                  # Single-AZ for sandbox
+      PubliclyAccessible: true        # Allows connection from local tools (MySQL Workbench etc.)
+      VPCSecurityGroups:
+        - !Ref RDSSecurityGroup
+      DBSubnetGroupName: !Ref RDSSubnetGroup
+      BackupRetentionPeriod: 0        # Disable automated backups for sandbox
+      DeletionProtection: false
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-mysql'
+
+Outputs:
+  RDSEndpoint:
+    Description: MySQL endpoint hostname
+    Value: !GetAtt RDSMySQLInstance.Endpoint.Address
+    Export:
+      Name: !Sub '${AWS::StackName}-endpoint'
+
+  RDSPort:
+    Description: MySQL port
+    Value: !GetAtt RDSMySQLInstance.Endpoint.Port
+    Export:
+      Name: !Sub '${AWS::StackName}-port'
+
+  MySQLConnectCommand:
+    Description: mysql CLI connection command (password in Secrets Manager)
+    Value: !Sub 'mysql -h ${RDSMySQLInstance.Endpoint.Address} -u ${DBUsername} ${DBName}'
+
+  RDSMasterSecretArn:
+    Description: ARN of the Secrets Manager secret containing the master password
+    Value: !Ref RDSMasterSecret
+    Export:
+      Name: !Sub '${AWS::StackName}-secret-arn'
+
+  RDSMasterSecretName:
+    Description: Name of the Secrets Manager secret
+    Value: !Ref RDSMasterSecret
+    Export:
+      Name: !Sub '${AWS::StackName}-secret-name'
+
+  JDBCConnectionString:
+    Description: JDBC connection string (Java / Spring Boot)
+    Value: !Sub 'jdbc:mysql://${RDSMySQLInstance.Endpoint.Address}:3306/${DBName}'

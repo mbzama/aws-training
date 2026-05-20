@@ -1,0 +1,267 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  RDS PostgreSQL only.
+
+  Deploy in us-east-1 only.
+  Default VPC and subnets (us-east-1a, us-east-1b) are auto-detected at deploy time.
+
+# ---------------------------------------------------------------
+# Sandbox Limits:
+#   RDS: t3/t4g micro|small|medium | max 50 GB | no provisioned IOPS
+# ---------------------------------------------------------------
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: RDS PostgreSQL
+        Parameters:
+          - DBInstanceClass
+          - DBName
+          - DBUsername
+          - AllocatedStorage
+          - PostgresVersion
+    ParameterLabels:
+      DBInstanceClass:
+        default: RDS Instance Class
+      DBName:
+        default: Initial Database Name
+      DBUsername:
+        default: Master Username
+      AllocatedStorage:
+        default: Storage Size (GB)
+      PostgresVersion:
+        default: PostgreSQL Version
+
+Parameters:
+  DBInstanceClass:
+    Type: String
+    Default: db.t3.micro
+    # Allowed: t3 or t4g micro, small, medium
+    AllowedValues:
+      - db.t3.micro
+      - db.t3.small
+      - db.t3.medium
+      - db.t4g.micro
+      - db.t4g.small
+      - db.t4g.medium
+    Description: 'Allowed: db.t3/t4g micro|small|medium only.'
+
+  PostgresVersion:
+    Type: String
+    Default: '16.3'
+    AllowedValues:
+      - '16.3'
+      - '15.7'
+      - '14.12'
+      - '13.15'
+    Description: PostgreSQL engine version.
+
+  DBName:
+    Type: String
+    Default: practicedb
+    MinLength: 1
+    MaxLength: 63
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9_]*'
+    Description: Name of the initial PostgreSQL database.
+
+  DBUsername:
+    Type: String
+    Default: pgadmin
+    MinLength: 1
+    MaxLength: 63
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9_]*'
+    Description: Master username (cannot be "postgres").
+
+  AllocatedStorage:
+    Type: Number
+    Default: 20
+    MinValue: 20
+    MaxValue: 50                      # max 50 GB
+    Description: Storage in GB (20–50 GB).
+
+Resources:
+
+  # ---------------------------------------------------------------
+  # Secrets Manager - Auto-generated Master Password
+  # ---------------------------------------------------------------
+
+  RDSMasterSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Description: !Sub 'PostgreSQL master password for ${AWS::StackName}'
+      GenerateSecretString:
+        PasswordLength: 32
+        ExcludeCharacters: '"@/\\%'
+
+  # ---------------------------------------------------------------
+  # Default VPC Lookup (Lambda Custom Resource)
+  # Auto-detects default VPC and subnets in us-east-1a, us-east-1b
+  # ---------------------------------------------------------------
+
+  DefaultVpcLookupPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Allows Lambda to describe VPCs and subnets for default VPC lookup
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - ec2:DescribeVpcs
+              - ec2:DescribeSubnets
+            Resource: '*'
+
+  DefaultVpcLookupRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - !Ref DefaultVpcLookupPolicy
+
+  DefaultVpcLookupFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${AWS::StackName}-vpc-lookup'
+      Runtime: python3.12
+      Handler: index.handler
+      Role: !GetAtt DefaultVpcLookupRole.Arn
+      Timeout: 30
+      Code:
+        ZipFile: |
+          import boto3
+          import cfnresponse
+
+          def handler(event, context):
+              if event['RequestType'] == 'Delete':
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                  return
+              try:
+                  ec2 = boto3.client('ec2')
+                  vpcs = ec2.describe_vpcs(Filters=[{'Name': 'isDefault', 'Values': ['true']}])
+                  vpc_id = vpcs['Vpcs'][0]['VpcId']
+                  subnets = ec2.describe_subnets(Filters=[
+                      {'Name': 'vpc-id', 'Values': [vpc_id]},
+                      {'Name': 'defaultForAz', 'Values': ['true']}
+                  ])
+                  allowed_azs = {'us-east-1a', 'us-east-1b'}
+                  subnet_list = sorted(
+                      [s for s in subnets['Subnets'] if s['AvailabilityZone'] in allowed_azs],
+                      key=lambda s: s['AvailabilityZone']
+                  )
+                  if not subnet_list:
+                      raise ValueError('No default subnets found in us-east-1a or us-east-1b')
+                  subnet_ids = [s['SubnetId'] for s in subnet_list]
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {
+                      'VpcId': vpc_id,
+                      'SubnetIds': ','.join(subnet_ids)
+                  })
+              except Exception as e:
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {'Error': str(e)})
+
+  DefaultVpcLookup:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken: !GetAtt DefaultVpcLookupFunction.Arn
+
+  # ---------------------------------------------------------------
+  # RDS Security Group & Database
+  # ---------------------------------------------------------------
+
+  RDSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: RDS PostgreSQL - allow port 5432 inbound
+      VpcId: !GetAtt DefaultVpcLookup.VpcId
+      SecurityGroupIngress:
+        - Description: PostgreSQL from anywhere in the VPC
+          IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          CidrIp: 0.0.0.0/0          # Restrict to your EC2 SG or IP in production
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-rds-sg'
+
+  RDSSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: !Sub 'Subnet group for ${AWS::StackName} PostgreSQL RDS'
+      SubnetIds: !Split [',', !GetAtt DefaultVpcLookup.SubnetIds]
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-subnet-group'
+
+  RDSPostgresInstance:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      DBInstanceIdentifier: !Sub '${AWS::StackName}-postgres'
+      DBInstanceClass: !Ref DBInstanceClass
+      Engine: postgres
+      EngineVersion: !Ref PostgresVersion
+      MasterUsername: !Ref DBUsername
+      MasterUserPassword: !Sub '{{resolve:secretsmanager:${RDSMasterSecret}:SecretString:}}'
+      DBName: !Ref DBName
+      AllocatedStorage: !Ref AllocatedStorage
+      MaxAllocatedStorage: 50         # Auto-scaling cap = 50 GB
+      StorageType: gp3                # gp3 — NO provisioned IOPS
+      StorageEncrypted: false
+      MultiAZ: false                  # Single-AZ for sandbox
+      PubliclyAccessible: true        # Set true so you can connect from local tools (pgAdmin etc.)
+      VPCSecurityGroups:
+        - !Ref RDSSecurityGroup
+      DBSubnetGroupName: !Ref RDSSubnetGroup
+      BackupRetentionPeriod: 0        # Disable automated backups for sandbox
+      DeletionProtection: false
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-postgres'
+
+Outputs:
+
+  DefaultVpcId:
+    Description: Auto-detected default VPC ID
+    Value: !GetAtt DefaultVpcLookup.VpcId
+    Export:
+      Name: !Sub '${AWS::StackName}-vpc-id'
+
+  RDSEndpoint:
+    Description: PostgreSQL endpoint hostname
+    Value: !GetAtt RDSPostgresInstance.Endpoint.Address
+    Export:
+      Name: !Sub '${AWS::StackName}-endpoint'
+
+  RDSPort:
+    Description: PostgreSQL port
+    Value: !GetAtt RDSPostgresInstance.Endpoint.Port
+    Export:
+      Name: !Sub '${AWS::StackName}-port'
+
+  RDSMasterSecretArn:
+    Description: ARN of the Secrets Manager secret containing the master password
+    Value: !Ref RDSMasterSecret
+    Export:
+      Name: !Sub '${AWS::StackName}-secret-arn'
+
+  RDSMasterSecretName:
+    Description: Name of the Secrets Manager secret
+    Value: !Ref RDSMasterSecret
+    Export:
+      Name: !Sub '${AWS::StackName}-secret-name'
+
+  PSQLConnectCommand:
+    Description: psql connection command (password stored in Secrets Manager)
+    Value: !Sub 'psql -h ${RDSPostgresInstance.Endpoint.Address} -U ${DBUsername} -d ${DBName}'
+
+  JDBCConnectionString:
+    Description: JDBC connection string (Java / Spring Boot)
+    Value: !Sub 'jdbc:postgresql://${RDSPostgresInstance.Endpoint.Address}:5432/${DBName}'

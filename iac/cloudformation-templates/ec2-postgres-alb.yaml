@@ -1,0 +1,465 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  EC2, RDS (PostgreSQL), and ALB using Default VPC.
+
+  Deploy in us-east-1 only.
+  Default VPC and subnets are auto-detected at deploy time.
+
+# ---------------------------------------------------------------
+# Sandbox Limits:
+#   EC2  : t2/t3/t3a/t4g micro|small|medium | max 100 GB | max 9 instances | default tenancy
+#   RDS  : t3/t4g micro|small|medium | max 50 GB | no provisioned IOPS
+#   ELB  : Fully supported
+# ---------------------------------------------------------------
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Naming
+        Parameters:
+          - ResourcePrefix
+      - Label:
+          default: EC2
+        Parameters:
+          - EC2InstanceType
+      - Label:
+          default: RDS
+        Parameters:
+          - DBInstanceClass
+          - DBUsername
+          - DBName
+    ParameterLabels:
+      ResourcePrefix:
+        default: Resource Prefix
+      EC2InstanceType:
+        default: EC2 Instance Type
+      DBInstanceClass:
+        default: RDS Instance Class
+      DBUsername:
+        default: RDS Master Username
+      DBName:
+        default: Initial Database Name
+
+Parameters:
+  ResourcePrefix:
+    Type: String
+    Default: app
+    MinLength: 1
+    MaxLength: 10
+    AllowedPattern: '[a-z][a-z0-9]*'
+    Description: 'Short alphanumeric prefix for resource names (1-10 chars, lowercase). Used to keep ALB/TG names within AWS 32-character limit.'
+
+  EC2InstanceType:
+    Type: String
+    Default: t3.medium
+    AllowedValues:
+      - t2.micro
+      - t2.small
+      - t2.medium
+      - t3.micro
+      - t3.small
+      - t3.medium
+      - t3a.micro
+      - t3a.small
+      - t3a.medium
+    Description: 'EC2 instance type. Allowed: t2/t3/t3a micro|small|medium only.'
+
+  DBInstanceClass:
+    Type: String
+    Default: db.t3.medium
+    AllowedValues:
+      - db.t3.micro
+      - db.t3.small
+      - db.t3.medium
+      - db.t4g.micro
+      - db.t4g.small
+      - db.t4g.medium
+    Description: 'RDS instance class. Allowed: db.t3/t4g micro|small|medium only.'
+
+  DBName:
+    Type: String
+    Default: practicedb
+    MinLength: 1
+    MaxLength: 63
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9_]*'
+    Description: Name of the initial PostgreSQL database.
+
+  DBUsername:
+    Type: String
+    Default: pgadmin
+    MinLength: 1
+    MaxLength: 16
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9]*'
+    Description: RDS master username (cannot be "postgres" - reserved by AWS).
+
+Resources:
+
+  # ---------------------------------------------------------------
+  # Secrets Manager - RDS Password
+  # ---------------------------------------------------------------
+
+  RDSMasterSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub '${AWS::StackName}-rds-password'
+      Description: !Sub 'RDS master password for ${AWS::StackName}'
+      GenerateSecretString:
+        SecretStringTemplate: !Sub '{"username": "${DBUsername}"}'
+        GenerateStringKey: password
+        PasswordLength: 32
+        ExcludeCharacters: '"@/\\'
+
+  # ---------------------------------------------------------------
+  # Default VPC Lookup (Lambda Custom Resource)
+  # Queries AWS at deploy time for the default VPC and its subnets.
+  # ---------------------------------------------------------------
+
+  DefaultVpcLookupPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Allows Lambda to describe VPCs and subnets for default VPC lookup
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - ec2:DescribeVpcs
+              - ec2:DescribeSubnets
+            Resource: '*'
+
+  DefaultVpcLookupRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - !Ref DefaultVpcLookupPolicy
+
+  DefaultVpcLookupFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${AWS::StackName}-vpc-lookup'
+      Runtime: python3.12
+      Handler: index.handler
+      Role: !GetAtt DefaultVpcLookupRole.Arn
+      Timeout: 30
+      Code:
+        ZipFile: |
+          import boto3
+          import cfnresponse
+          import hashlib
+
+          def handler(event, context):
+              if event['RequestType'] == 'Delete':
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                  return
+              try:
+                  # Stable suffix derived from stack ID - consistent across stack updates
+                  suffix = hashlib.md5(event['StackId'].encode()).hexdigest()[:8]
+                  ec2 = boto3.client('ec2')
+                  vpcs = ec2.describe_vpcs(Filters=[{'Name': 'isDefault', 'Values': ['true']}])
+                  vpc_id = vpcs['Vpcs'][0]['VpcId']
+                  subnets = ec2.describe_subnets(Filters=[
+                      {'Name': 'vpc-id', 'Values': [vpc_id]},
+                      {'Name': 'defaultForAz', 'Values': ['true']}
+                  ])
+                  subnet_ids = sorted([s['SubnetId'] for s in subnets['Subnets']])
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {
+                      'VpcId': vpc_id,
+                      'SubnetIds': ','.join(subnet_ids),
+                      'SubnetId0': subnet_ids[0],
+                      'Suffix': suffix
+                  })
+              except Exception as e:
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {'Error': str(e)})
+
+  DefaultVpcLookup:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken: !GetAtt DefaultVpcLookupFunction.Arn
+
+  # ---------------------------------------------------------------
+  # Security Groups
+  # ---------------------------------------------------------------
+
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: ALB - allow HTTP (80) inbound from the internet
+      VpcId: !GetAtt DefaultVpcLookup.VpcId
+      SecurityGroupIngress:
+        - Description: HTTP from internet
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-alb-sg'
+
+  EC2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: 'EC2 - allow HTTP from ALB and EC2 Instance Connect'
+      VpcId: !GetAtt DefaultVpcLookup.VpcId
+      SecurityGroupIngress:
+        - Description: HTTP from ALB only
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourceSecurityGroupId: !Ref ALBSecurityGroup
+        - Description: 'EC2 Instance Connect (AWS console access)'
+          IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-ec2-sg'
+
+  RDSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: RDS - allow PostgreSQL (5432) from EC2 only
+      VpcId: !GetAtt DefaultVpcLookup.VpcId
+      SecurityGroupIngress:
+        - Description: PostgreSQL from EC2
+          IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref EC2SecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-rds-sg'
+
+  # ---------------------------------------------------------------
+  # IAM Role for EC2 Instance Connect
+  # ---------------------------------------------------------------
+
+  EC2InstanceConnectRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/EC2InstanceConnect
+      Description: Allows EC2 Instance Connect access via AWS Console
+
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref EC2InstanceConnectRole
+
+  # ---------------------------------------------------------------
+  # EC2 Instance
+  # ---------------------------------------------------------------
+
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref EC2InstanceType
+      ImageId: !Sub '{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64}}'
+      IamInstanceProfile: !Ref EC2InstanceProfile
+      Tenancy: default
+      SecurityGroupIds:
+        - !Ref EC2SecurityGroup
+      SubnetId: !GetAtt DefaultVpcLookup.SubnetId0
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: 20
+            VolumeType: gp3
+            DeleteOnTermination: true
+      UserData:
+        Fn::Base64: |
+          #!/bin/bash
+          dnf update -y
+          dnf install -y httpd postgresql15
+          systemctl enable httpd
+          systemctl start httpd
+          TOKEN=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" \
+            -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
+          INSTANCE_ID=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" \
+            http://169.254.169.254/latest/meta-data/instance-id)
+          AZ=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" \
+            http://169.254.169.254/latest/meta-data/placement/availability-zone)
+          cat > /var/www/html/index.html <<EOF
+          <!DOCTYPE html>
+          <html>
+          <head><title>Practice Instance</title></head>
+          <body>
+            <h1>Practice EC2 Instance</h1>
+            <p><strong>Instance ID:</strong> ${INSTANCE_ID}</p>
+            <p><strong>Availability Zone:</strong> ${AZ}</p>
+            <p>Traffic is routed through the Application Load Balancer.</p>
+          </body>
+          </html>
+          EOF
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-ec2'
+
+  # ---------------------------------------------------------------
+  # RDS PostgreSQL
+  # ---------------------------------------------------------------
+
+  RDSSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: !Sub 'Subnet group for ${AWS::StackName} RDS'
+      SubnetIds: !Split [',', !GetAtt DefaultVpcLookup.SubnetIds]
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-rds-subnet-group'
+
+  RDSInstance:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      DBInstanceIdentifier: !Sub 'postgres-${DefaultVpcLookup.Suffix}'
+      DBInstanceClass: !Ref DBInstanceClass
+      Engine: postgres
+      EngineVersion: '16.3'
+      MasterUsername: !Ref DBUsername
+      MasterUserPassword: !Sub '{{resolve:secretsmanager:${RDSMasterSecret}:SecretString:password}}'
+      DBName: !Ref DBName
+      AllocatedStorage: '20'
+      MaxAllocatedStorage: 50
+      StorageType: gp3
+      StorageEncrypted: false
+      MultiAZ: false
+      PubliclyAccessible: false
+      VPCSecurityGroups:
+        - !Ref RDSSecurityGroup
+      DBSubnetGroupName: !Ref RDSSubnetGroup
+      BackupRetentionPeriod: 1        # 1-day retention
+      DeletionProtection: false
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-rds'
+
+  # ---------------------------------------------------------------
+  # Application Load Balancer
+  # ---------------------------------------------------------------
+
+  ALBTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub '${ResourcePrefix}-tg-${DefaultVpcLookup.Suffix}'
+      Port: 80
+      Protocol: HTTP
+      VpcId: !GetAtt DefaultVpcLookup.VpcId
+      TargetType: instance
+      Targets:
+        - Id: !Ref EC2Instance
+          Port: 80
+      HealthCheckProtocol: HTTP
+      HealthCheckPath: /
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-tg'
+
+  ApplicationLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub '${ResourcePrefix}-alb-${DefaultVpcLookup.Suffix}'
+      Scheme: internet-facing
+      Type: application
+      Subnets: !Split [',', !GetAtt DefaultVpcLookup.SubnetIds]
+      SecurityGroups:
+        - !Ref ALBSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-alb'
+
+  ALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref ApplicationLoadBalancer
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref ALBTargetGroup
+
+# ---------------------------------------------------------------
+# Outputs
+# ---------------------------------------------------------------
+
+Outputs:
+
+  DefaultVpcId:
+    Description: Auto-detected default VPC ID
+    Value: !GetAtt DefaultVpcLookup.VpcId
+
+  ALBDNSName:
+    Description: Application Load Balancer DNS - open this in your browser
+    Value: !Sub 'http://${ApplicationLoadBalancer.DNSName}'
+    Export:
+      Name: !Sub '${AWS::StackName}-alb-dns'
+
+  EC2InstanceId:
+    Description: EC2 Instance ID
+    Value: !Ref EC2Instance
+    Export:
+      Name: !Sub '${AWS::StackName}-ec2-id'
+
+  EC2PublicIP:
+    Description: EC2 Public IP (SSH access)
+    Value: !GetAtt EC2Instance.PublicIp
+    Export:
+      Name: !Sub '${AWS::StackName}-ec2-ip'
+
+  RDSEndpoint:
+    Description: RDS PostgreSQL endpoint (connect from EC2 using psql client)
+    Value: !GetAtt RDSInstance.Endpoint.Address
+    Export:
+      Name: !Sub '${AWS::StackName}-rds-endpoint'
+
+  RDSPort:
+    Description: RDS PostgreSQL port
+    Value: !GetAtt RDSInstance.Endpoint.Port
+    Export:
+      Name: !Sub '${AWS::StackName}-rds-port'
+
+  SSHCommand:
+    Description: 'How to connect to EC2 using EC2 Instance Connect'
+    Value: !Sub 'Use AWS Systems Manager Session Manager or AWS Console EC2 Connect feature for instance ID ${EC2Instance.InstanceId}. No SSH key needed.'
+    Export:
+      Name: !Sub '${AWS::StackName}-connect-info'
+
+  PostgreSQLConnectCommand:
+    Description: PostgreSQL connect command (run from EC2)
+    Value: !Sub 'psql -h ${RDSInstance.Endpoint.Address} -U ${DBUsername} -d ${DBName}'
+    Export:
+      Name: !Sub '${AWS::StackName}-psql-command'
+
+  RDSSecretArn:
+    Description: Secrets Manager ARN for RDS master credentials
+    Value: !Ref RDSMasterSecret
+    Export:
+      Name: !Sub '${AWS::StackName}-rds-secret-arn'
+
+  RDSSecretName:
+    Description: Secrets Manager secret name for RDS master credentials
+    Value: !Sub '${AWS::StackName}-rds-password'
+    Export:
+      Name: !Sub '${AWS::StackName}-rds-secret-name'

@@ -1,0 +1,231 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Application Load Balancer only.
+  Includes ALB, Target Group, HTTP Listener, and optional HTTPS Listener.
+
+  Deploy in us-east-1 or us-west-2 only.
+
+# ---------------------------------------------------------------
+# Sandbox Limits:
+#   Elastic Load Balancing (ELB): Fully supported
+# ---------------------------------------------------------------
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Network
+        Parameters:
+          - VpcId
+          - SubnetIds
+      - Label:
+          default: ALB
+        Parameters:
+          - ALBScheme
+          - EnableHTTPS
+          - CertificateArn
+      - Label:
+          default: Target Group
+        Parameters:
+          - TargetPort
+          - HealthCheckPath
+    ParameterLabels:
+      VpcId:
+        default: Default VPC ID
+      SubnetIds:
+        default: Subnets (select at least 2 from different AZs)
+      ALBScheme:
+        default: ALB Scheme
+      EnableHTTPS:
+        default: Enable HTTPS Listener (443)
+      CertificateArn:
+        default: ACM Certificate ARN (required only if HTTPS enabled)
+      TargetPort:
+        default: Target Port (port your instances listen on)
+      HealthCheckPath:
+        default: Health Check Path
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: Select your default VPC.
+
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Select at least 2 subnets in different AZs (required for ALB).
+
+  ALBScheme:
+    Type: String
+    Default: internet-facing
+    AllowedValues:
+      - internet-facing
+      - internal
+    Description: internet-facing = public ALB; internal = private ALB.
+
+  EnableHTTPS:
+    Type: String
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Description: Set to true to add an HTTPS (443) listener. Requires a valid ACM Certificate ARN.
+
+  CertificateArn:
+    Type: String
+    Default: ''
+    Description: >
+      ACM Certificate ARN for HTTPS. Leave blank if EnableHTTPS is false.
+      Example: arn:aws:acm:us-east-1:123456789012:certificate/abc-123
+
+  TargetPort:
+    Type: Number
+    Default: 80
+    MinValue: 1
+    MaxValue: 65535
+    Description: Port your backend instances/targets listen on.
+
+  HealthCheckPath:
+    Type: String
+    Default: /
+    Description: Path used by ALB to health-check targets (e.g. / or /health).
+
+Conditions:
+  IsHTTPSEnabled: !Equals [!Ref EnableHTTPS, 'true']
+
+Resources:
+
+  # ---------------------------------------------------------------
+  # Security Group
+  # ---------------------------------------------------------------
+
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: ALB - allow HTTP (80) and optional HTTPS (443) from internet
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - Description: HTTP from internet
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - Description: HTTPS from internet
+          IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-alb-sg'
+
+  # ---------------------------------------------------------------
+  # Target Group
+  # (Attach your EC2 instances or Auto Scaling group to this)
+  # ---------------------------------------------------------------
+
+  ALBTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub '${AWS::StackName}-tg'
+      VpcId: !Ref VpcId
+      Protocol: HTTP
+      Port: !Ref TargetPort
+      TargetType: instance
+      HealthCheckProtocol: HTTP
+      HealthCheckPath: !Ref HealthCheckPath
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      Matcher:
+        HttpCode: '200-399'
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-tg'
+
+  # ---------------------------------------------------------------
+  # Application Load Balancer
+  # ---------------------------------------------------------------
+
+  ApplicationLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub '${AWS::StackName}-alb'
+      Scheme: !Ref ALBScheme
+      Type: application
+      Subnets: !Ref SubnetIds
+      SecurityGroups:
+        - !Ref ALBSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-alb'
+
+  # ---------------------------------------------------------------
+  # HTTP Listener (port 80)
+  # - If HTTPS is enabled: redirects HTTP -> HTTPS
+  # - If HTTPS is disabled: forwards to target group
+  # ---------------------------------------------------------------
+
+  HTTPListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref ApplicationLoadBalancer
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - !If
+          - IsHTTPSEnabled
+          - Type: redirect
+            RedirectConfig:
+              Protocol: HTTPS
+              Port: '443'
+              StatusCode: HTTP_301
+          - Type: forward
+            TargetGroupArn: !Ref ALBTargetGroup
+
+  # ---------------------------------------------------------------
+  # HTTPS Listener (port 443) — created only if EnableHTTPS = true
+  # ---------------------------------------------------------------
+
+  HTTPSListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Condition: IsHTTPSEnabled
+    Properties:
+      LoadBalancerArn: !Ref ApplicationLoadBalancer
+      Port: 443
+      Protocol: HTTPS
+      SslPolicy: ELBSecurityPolicy-TLS13-1-2-2021-06
+      Certificates:
+        - CertificateArn: !Ref CertificateArn
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref ALBTargetGroup
+
+Outputs:
+  ALBDNSName:
+    Description: ALB DNS name - use this in your browser or DNS record
+    Value: !Sub 'http://${ApplicationLoadBalancer.DNSName}'
+    Export:
+      Name: !Sub '${AWS::StackName}-dns'
+
+  ALBArn:
+    Description: ALB ARN (use to attach to EC2 / Auto Scaling stacks)
+    Value: !Ref ApplicationLoadBalancer
+    Export:
+      Name: !Sub '${AWS::StackName}-arn'
+
+  TargetGroupArn:
+    Description: Target Group ARN (register EC2 instances or Auto Scaling group here)
+    Value: !Ref ALBTargetGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-tg-arn'
+
+  ALBSecurityGroupId:
+    Description: ALB Security Group ID (allow traffic from ALB to EC2 SG)
+    Value: !Ref ALBSecurityGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-sg-id'
+
+  ALBHostedZoneId:
+    Description: ALB Hosted Zone ID (for Route 53 alias records)
+    Value: !GetAtt ApplicationLoadBalancer.CanonicalHostedZoneID
