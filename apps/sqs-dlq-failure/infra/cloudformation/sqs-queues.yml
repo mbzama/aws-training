@@ -1,0 +1,208 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  SQS Orders Queue + Dead Letter Queue (DLQ) for the sqs-dlq-failure demo.
+  Messages that fail processing 3 times are automatically moved to the DLQ.
+
+# ─────────────────────────────────────────────
+#  MAPPINGS
+# ─────────────────────────────────────────────
+Mappings:
+  RetentionDays:
+    # Map human-readable day counts → seconds (SQS expects seconds)
+    '1':  { Seconds: '86400'   }
+    '4':  { Seconds: '345600'  }
+    '7':  { Seconds: '604800'  }
+    '14': { Seconds: '1209600' }
+
+# ─────────────────────────────────────────────
+#  PARAMETERS
+# ─────────────────────────────────────────────
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, staging, prod]
+    Description: Deployment environment — appended to all resource names
+
+  MaxReceiveCount:
+    Type: Number
+    Default: 3
+    MinValue: 1
+    MaxValue: 1000
+    Description: >
+      Number of times a message is delivered to the main queue before
+      SQS automatically moves it to the DLQ.
+
+  VisibilityTimeoutSeconds:
+    Type: Number
+    Default: 30
+    MinValue: 0
+    MaxValue: 43200
+    Description: >
+      Seconds a received message is hidden from other consumers.
+      Set this to at least your worker's maximum processing time.
+
+  MainQueueRetentionDays:
+    Type: String
+    Default: '1'
+    AllowedValues: ['1', '4', '7', '14']
+    Description: Message retention for the main orders queue (in days)
+
+  DLQRetentionDays:
+    Type: String
+    Default: '14'
+    AllowedValues: ['1', '4', '7', '14']
+    Description: >
+      Message retention for the DLQ (in days).
+      Keep high so engineers have time to inspect failed messages.
+
+# ─────────────────────────────────────────────
+#  RESOURCES
+# ─────────────────────────────────────────────
+Resources:
+
+  # ─────────────────────────────────────────────────────────────────────────
+  #  1. Dead Letter Queue
+  #     Must be created BEFORE the main queue because the main queue's
+  #     RedrivePolicy references the DLQ ARN at creation time.
+  # ─────────────────────────────────────────────────────────────────────────
+  OrdersDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub orders-dlq-${Environment}
+      MessageRetentionPeriod: !FindInMap
+        - RetentionDays
+        - !Ref DLQRetentionDays
+        - Seconds
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: sqs-dlq-failure
+        - Key: QueueType
+          Value: dlq
+
+  # ─────────────────────────────────────────────────────────────────────────
+  #  2. Main Orders Queue
+  #     RedrivePolicy wires this queue to the DLQ.
+  #     After MaxReceiveCount failed attempts, SQS moves the message
+  #     automatically — no application code required.
+  # ─────────────────────────────────────────────────────────────────────────
+  OrdersQueue:
+    Type: AWS::SQS::Queue
+    DependsOn: OrdersDLQ
+    Properties:
+      QueueName: !Sub orders-queue-${Environment}
+      # Hides the message for this long after a consumer receives it.
+      # If the consumer doesn't delete it within this window, SQS makes
+      # it visible again (counted as another receive attempt).
+      VisibilityTimeout: !Ref VisibilityTimeoutSeconds
+      MessageRetentionPeriod: !FindInMap
+        - RetentionDays
+        - !Ref MainQueueRetentionDays
+        - Seconds
+      # Long polling: workers wait up to 20s for a message instead of
+      # immediately returning empty — reduces API call count and cost.
+      ReceiveMessageWaitTimeSeconds: 20
+      # The Redrive Policy is the core DLQ mechanism.
+      # After maxReceiveCount receives, SQS moves the message to the DLQ.
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt OrdersDLQ.Arn
+        maxReceiveCount: !Ref MaxReceiveCount
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: sqs-dlq-failure
+        - Key: QueueType
+          Value: main
+
+  # ─────────────────────────────────────────────────────────────────────────
+  #  3. CloudWatch Alarms
+  # ─────────────────────────────────────────────────────────────────────────
+
+  # Fires as soon as any message lands in the DLQ (processing is failing)
+  DLQMessageAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub orders-dlq-messages-visible-${Environment}
+      AlarmDescription: >
+        Messages are landing in the DLQ — order processing failures detected.
+        Check failure-processor logs and inspect original message payloads.
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt OrdersDLQ.QueueName
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+  # Fires when the main queue backs up (workers may be down or under-provisioned)
+  MainQueueDepthAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub orders-queue-depth-${Environment}
+      AlarmDescription: >
+        Main orders queue depth is high — workers may be unhealthy or under-provisioned.
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt OrdersQueue.QueueName
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 100
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+# ─────────────────────────────────────────────
+#  OUTPUTS  (importable by other stacks)
+# ─────────────────────────────────────────────
+Outputs:
+
+  OrdersQueueUrl:
+    Description: URL of the main orders SQS queue
+    Value: !Ref OrdersQueue
+    Export:
+      Name: !Sub ${AWS::StackName}-OrdersQueueUrl
+
+  OrdersQueueArn:
+    Description: ARN of the main orders SQS queue
+    Value: !GetAtt OrdersQueue.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-OrdersQueueArn
+
+  OrdersQueueName:
+    Description: Name of the main orders SQS queue
+    Value: !GetAtt OrdersQueue.QueueName
+    Export:
+      Name: !Sub ${AWS::StackName}-OrdersQueueName
+
+  OrdersDLQUrl:
+    Description: URL of the Dead Letter Queue
+    Value: !Ref OrdersDLQ
+    Export:
+      Name: !Sub ${AWS::StackName}-OrdersDLQUrl
+
+  OrdersDLQArn:
+    Description: ARN of the Dead Letter Queue
+    Value: !GetAtt OrdersDLQ.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-OrdersDLQArn
+
+  OrdersDLQName:
+    Description: Name of the Dead Letter Queue
+    Value: !GetAtt OrdersDLQ.QueueName
+    Export:
+      Name: !Sub ${AWS::StackName}-OrdersDLQName
+
+  DLQAlarmName:
+    Description: CloudWatch alarm that fires when messages hit the DLQ
+    Value: !Ref DLQMessageAlarm
+    Export:
+      Name: !Sub ${AWS::StackName}-DLQAlarmName

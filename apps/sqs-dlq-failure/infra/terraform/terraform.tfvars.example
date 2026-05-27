@@ -1,0 +1,25 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# terraform.tfvars.example
+# Copy to terraform.tfvars and edit for your environment.
+# Never commit terraform.tfvars to version control.
+# ─────────────────────────────────────────────────────────────────────────────
+
+environment = "dev"
+aws_region  = "us-east-1"
+
+# ── Queue tuning ──────────────────────────────────────────────────────────────
+max_receive_count            = 3       # Move to DLQ after 3 failed attempts
+visibility_timeout_seconds   = 30      # Worker has 30s to process each message
+main_queue_retention_seconds = 86400   # 1 day
+dlq_retention_seconds        = 1209600 # 14 days
+
+# ── Alarms ─────────────────────────────────────────────────────────────────────
+# Leave empty to skip SNS notifications
+alarm_sns_topic_arn         = ""
+queue_depth_alarm_threshold = 100
+
+# ── Tags ──────────────────────────────────────────────────────────────────────
+common_tags = {
+  Owner   = "platform-team"
+  CostCenter = "engineering"
+}
