@@ -5,6 +5,8 @@ ehthumbs.db
 Desktop.ini
 
 # ── IDE / editor ──────────────────────────────────────────────────────────────
+.claude/
+**/.claude/
 .vscode/
 .idea/
 *.swp
@@ -25,6 +27,8 @@ yarn-error.log*
 pnpm-debug.log*
 
 # ── Build artifacts ───────────────────────────────────────────────────────────
+.build/
+**/.build/
 dist/
 build/
 out/
