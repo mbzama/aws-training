@@ -1,0 +1,64 @@
+version: "3.9"
+
+services:
+  floci:
+    image: docker.io/floci/floci:latest
+    container_name: floci-event-booking
+    ports:
+      - "4566:4566"
+    environment:
+      # Enable all required AWS services
+      - SERVICES=dynamodb,s3,sqs,sns,apigateway,cognito-idp,cloudwatch,logs
+
+      # Storage configuration
+      - DATA_DIR=/var/lib/floci
+      - PERSISTENCE=1
+
+      # Lambda configuration for Podman
+      - LAMBDA_EXECUTOR=podman
+      - DOCKER_HOST=npipe:////./pipe/podman-desktop
+
+      # Logging
+      - DEBUG=0
+      - LOG_LEVEL=info
+
+      # S3 configuration
+      - S3_IGNORE_SUBDOMAIN_BUCKETNAME=true
+
+
+      # Disable unnecessary services
+      - DISABLE_EC2_ENDPOINT=true
+      - DISABLE_RDS_ENDPOINT=true
+      - DISABLE_ELASTICSEARCH_ENDPOINT=true
+
+    volumes:
+      # Persist Floci data across restarts
+      - ./floci-data:/var/lib/floci
+
+      # Mount Podman socket for Lambda execution (required)
+      # For rootless Podman: /run/user/$(id -u)/podman/podman.sock
+      # For root Podman: /run/podman/podman.sock
+      #- //./pipe/podman-desktop:/var/run/docker.sock
+
+    network_mode: "host"
+
+  floci-ui:
+    image: docker.io/floci/floci-ui:latest
+    container_name: floci-ui
+    ports:
+      - "4500:80"
+    environment:
+      FLOCI_ENDPOINT: http://localhost:4566
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      # Explicit service endpoints
+      AWS_DYNAMODB_ENDPOINT: http://localhost:4566
+      AWS_S3_ENDPOINT: http://localhost:4566
+      AWS_SQS_ENDPOINT: http://localhost:4566
+      AWS_SNS_ENDPOINT: http://localhost:4566
+      AWS_LAMBDA_ENDPOINT: http://localhost:4566
+      AWS_COGNITO_ENDPOINT: http://localhost:4566
+    depends_on:
+      - floci
+    network_mode: "host"

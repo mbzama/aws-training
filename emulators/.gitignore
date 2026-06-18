@@ -1,0 +1,8 @@
+# Terraform plan output (no extension — root .gitignore covers *.tfplan only)
+**/tfplan
+
+# Floci local data volume
+floci-data/
+
+# Frontend env (may contain real endpoints or tokens)
+floci/frontend/.env

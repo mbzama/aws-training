@@ -1,0 +1,69 @@
+wsl
+
+path to folder on wsl
+podman-compose up -d
+sleep 15
+
+export AWS_ACCESS_KEY_ID=test
+export AWS_SECRET_ACCESS_KEY=test
+export AWS_DEFAULT_REGION=us-east-1
+export AWS_ENDPOINT_URL=http://localhost:4566
+
+
+cd terraform
+terraform init
+terraform apply -auto-approve
+cd ..
+
+bash sync-env.sh
+
+ter 1
+sudo apt install -y python3-venv python3-full
+python3 -m venv venv
+source venv/bin/activate
+
+python seed_events_simple.py
+
+python app.py
+
+ter 2
+source venv/bin/activate
+python worker.py
+
+
+ter 3
+source venv/bin/activate
+cd frontend
+npm install
+npm start
+
+
+podman pull docker.io/floci/floci:latest
+podman run -d \
+  --name floci-event-booking \
+  -p 4566:4566 \
+  docker.io/floci/floci:latest
+
+------------------------------------------------------------------------
+run these commands once as i have removed all the large and unnecessary files:
+
+# 1. Start Floci
+podman-compose up -d
+
+# 2. Install Python dependencies
+python3 -m venv venv && source venv/bin/activate
+pip install -r requirements.txt
+
+# 3. Install frontend dependencies
+cd frontend && npm install && cd ..
+
+# 4. Init Terraform
+cd terraform && terraform init && terraform apply -auto-approve && cd ..
+
+# 5. Seed events
+python seed_events_simple.py
+
+# 6. Run the app
+python app.py          # Terminal 1
+python worker.py       # Terminal 2
+cd frontend && npm start  # Terminal 3

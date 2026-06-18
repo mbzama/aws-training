@@ -1,0 +1,283 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Event Ticket Booking Platform - CloudFormation for Floci
+
+Parameters:
+  Environment:
+    Type: String
+    Default: local
+
+Resources:
+  CognitoUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: EventBookingUserPool
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+
+  CognitoUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      ClientName: EventBookingClient
+      GenerateSecret: false
+      ExplicitAuthFlows:
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+
+  EventsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: Events
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: eventId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: eventId
+          KeyType: HASH
+
+  BookingsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: Bookings
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: userId
+          AttributeType: S
+        - AttributeName: bookingId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: userId
+          KeyType: HASH
+        - AttributeName: bookingId
+          KeyType: RANGE
+
+  BookingQueueDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: BookingQueueDLQ
+      MessageRetentionPeriod: 1209600
+
+  BookingQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: BookingQueue
+      VisibilityTimeout: 300
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt BookingQueueDLQ.Arn
+        maxReceiveCount: 3
+
+  BookingNotificationTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: BookingNotifications
+      DisplayName: Booking Notifications
+
+  TicketsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub 'event-tickets-${AWS::AccountId}'
+
+  FrontendBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub 'event-booking-frontend-${AWS::AccountId}'
+
+  FrontendBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref FrontendBucket
+      PolicyText:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: '*'
+            Action: 's3:GetObject'
+            Resource: !Sub '${FrontendBucket.Arn}/*'
+
+  EventStream:
+    Type: AWS::Kinesis::Stream
+    Properties:
+      Name: event-booking-stream
+      ShardSpecification:
+        DesiredThroughput: 1
+
+  EventBookingApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: EventBookingApi
+
+  EventsResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref EventBookingApi
+      ParentId: !GetAtt EventBookingApi.RootResourceId
+      PathPart: events
+
+  EventsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref EventBookingApi
+      ResourceId: !Ref EventsResource
+      HttpMethod: GET
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        IntegrationResponses:
+          - StatusCode: 200
+
+  ApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn: EventsMethod
+    Properties:
+      RestApiId: !Ref EventBookingApi
+      StageName: !Ref Environment
+
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: DynamoDBAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                Resource:
+                  - !GetAtt BookingsTable.Arn
+                  - !GetAtt EventsTable.Arn
+        - PolicyName: SQSAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                Resource:
+                  - !GetAtt BookingQueue.Arn
+                  - !GetAtt BookingQueueDLQ.Arn
+        - PolicyName: SNSAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sns:Publish
+                Resource: !Ref BookingNotificationTopic
+        - PolicyName: S3Access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                Resource: !Sub '${TicketsBucket.Arn}/*'
+
+  EventsFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: event-booking-events
+      Runtime: nodejs22.x
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        ZipFile: 'exports.handler = async (event) => { return { statusCode: 200 }; };'
+
+  BookingFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: event-booking-book
+      Runtime: nodejs22.x
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Environment:
+        Variables:
+          BOOKINGS_TABLE: !Ref BookingsTable
+          EVENTS_TABLE: !Ref EventsTable
+          BOOKING_QUEUE_URL: !Ref BookingQueue
+          BOOKING_TOPIC_ARN: !Ref BookingNotificationTopic
+          AWS_ENDPOINT_URL: 'http://localhost:4566'
+          AWS_DEFAULT_REGION: !Ref AWS::Region
+      Code:
+        ZipFile: 'exports.handler = async (event) => { return { statusCode: 200 }; };'
+
+  HistoryFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: event-booking-history
+      Runtime: nodejs22.x
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        ZipFile: 'exports.handler = async (event) => { return { statusCode: 200 }; };'
+
+  TicketGeneratorFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: event-booking-ticket-generator
+      Runtime: nodejs22.x
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 60
+      MemorySize: 512
+      Code:
+        ZipFile: 'exports.handler = async (event) => { return { statusCode: 200 }; };'
+
+  CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        DefaultRootObject: index.html
+        Origins:
+          - Id: S3Origin
+            DomainName: !GetAtt FrontendBucket.RegionalDomainName
+            S3OriginConfig: {}
+        DefaultCacheBehavior:
+          AllowedMethods:
+            - GET
+            - HEAD
+          TargetOriginId: S3Origin
+          ViewerProtocolPolicy: allow-all
+          ForwardedValues:
+            QueryString: false
+
+Outputs:
+  UserPoolId:
+    Value: !Ref CognitoUserPool
+  UserPoolClientId:
+    Value: !Ref CognitoUserPoolClient
+  EventsTableName:
+    Value: !Ref EventsTable
+  BookingsTableName:
+    Value: !Ref BookingsTable
+  TicketsBucketName:
+    Value: !Ref TicketsBucket
+  FrontendBucketName:
+    Value: !Ref FrontendBucket
+  BookingQueueUrl:
+    Value: !Ref BookingQueue
+  BookingTopicArn:
+    Value: !Ref BookingNotificationTopic
+  EventStreamName:
+    Value: !Ref EventStream
+  ApiEndpoint:
+    Value: 'http://localhost:4566'
+  FlocaHealthCheck:
+    Value: 'http://localhost:4566/_floci/health'

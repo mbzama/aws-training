@@ -170,6 +170,39 @@ variable "ui_host" {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Grafana Alloy
+# ─────────────────────────────────────────────────────────────────────────────
+variable "alloy_namespace" {
+  description = "Kubernetes namespace for Grafana Alloy"
+  type        = string
+  default     = "grafana"
+}
+
+variable "alloy_chart_version" {
+  description = "Grafana Alloy Helm chart version — check https://github.com/grafana/alloy/releases for latest"
+  type        = string
+  default     = "0.9.1"
+}
+
+variable "grafana_cloud_loki_url" {
+  description = "Grafana Cloud Loki push URL (e.g. https://logs-prod-XXX.grafana.net/loki/api/v1/push)"
+  type        = string
+  sensitive   = true
+}
+
+variable "grafana_cloud_loki_username" {
+  description = "Grafana Cloud Loki user ID — numeric value shown under Cloud Portal → Loki → Details"
+  type        = string
+  sensitive   = true
+}
+
+variable "grafana_cloud_loki_password" {
+  description = "Grafana Cloud API key with MetricsPublisher (or Logs) role"
+  type        = string
+  sensitive   = true
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
 # API Gateway
 # ─────────────────────────────────────────────────────────────────────────────
 variable "api_gateway_name" {

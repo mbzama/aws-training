@@ -1,0 +1,15 @@
+{
+  "name": "event-booking-backend",
+  "version": "1.0.0",
+  "description": "Serverless Event Booking Platform - Backend Lambda Functions",
+  "main": "index.js",
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "aws-sdk": "^2.1600.0",
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "aws-sdk-mock": "^5.8.0"
+  }
+}

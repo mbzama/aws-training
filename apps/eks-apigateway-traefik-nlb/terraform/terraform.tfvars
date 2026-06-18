@@ -41,6 +41,11 @@ ui_image     = "zamamb/mock-web:latest"
 ui_replicas  = 1
 ui_host      = "web.app-dev.example.com"
 
+# Grafana Alloy
+alloy_namespace     = "grafana"
+alloy_chart_version = "0.9.1"
+# Credentials → set in secrets.auto.tfvars (gitignored); see secrets.auto.tfvars.example
+
 # API Gateway
 api_gateway_name       = "hrms-api-gateway"
 custom_domain_name  = ""   # e.g. "api.example.com" — leave empty to skip custom domain setup

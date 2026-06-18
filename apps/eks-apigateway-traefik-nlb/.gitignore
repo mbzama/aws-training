@@ -32,6 +32,7 @@ out/
 !.env.example
 *.pem
 *.key
+terraform/secrets.auto.tfvars
 
 # ── Logs ──────────────────────────────────────────────────────────────────────
 *.log

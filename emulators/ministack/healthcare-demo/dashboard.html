@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Healthcare Demo Dashboard</title>
+  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: Arial, sans-serif; background: #f0f4f8; color: #333; }
+    .header { background: #1a73e8; color: white; padding: 20px 40px; }
+    .header h1 { font-size: 24px; }
+    .header p { font-size: 13px; opacity: 0.8; margin-top: 4px; }
+    .container { max-width: 1100px; margin: 30px auto; padding: 0 20px; }
+    .grid { display: grid; grid-template-columns: 1fr 2fr; gap: 20px; }
+    .card { background: white; border-radius: 8px; padding: 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+    .card h2 { font-size: 16px; color: #1a73e8; margin-bottom: 16px; border-bottom: 2px solid #e8f0fe; padding-bottom: 8px; }
+    .form-group { margin-bottom: 14px; }
+    .form-group label { display: block; font-size: 13px; font-weight: bold; margin-bottom: 4px; color: #555; }
+    .form-group input, .form-group select { width: 100%; padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; }
+    .btn { width: 100%; padding: 10px; background: #1a73e8; color: white; border: none; border-radius: 6px; font-size: 14px; cursor: pointer; font-weight: bold; }
+    .btn:hover { background: #1557b0; }
+    .btn:disabled { background: #aaa; cursor: not-allowed; }
+    .btn-sm { width: auto; padding: 5px 12px; font-size: 12px; background: #34a853; border: none; border-radius: 4px; color: white; cursor: pointer; }
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th { background: #e8f0fe; color: #1a73e8; padding: 10px 12px; text-align: left; }
+    td { padding: 10px 12px; border-bottom: 1px solid #f0f0f0; }
+    .badge { padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: bold; }
+    .badge-booked { background: #fff3cd; color: #856404; }
+    .badge-confirmed { background: #d4edda; color: #155724; }
+    .alert { padding: 10px 14px; border-radius: 6px; font-size: 13px; margin-bottom: 14px; }
+    .alert-success { background: #d4edda; color: #155724; }
+    .alert-error { background: #f8d7da; color: #721c24; }
+    .s3-list { list-style: none; }
+    .s3-list li { padding: 8px 0; border-bottom: 1px solid #f0f0f0; font-size: 13px; display: flex; justify-content: space-between; }
+    .empty { text-align: center; color: #aaa; padding: 20px; font-size: 13px; }
+    .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 20px; }
+    .stat { background: white; border-radius: 8px; padding: 16px; text-align: center; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+    .stat-num { font-size: 28px; font-weight: bold; color: #1a73e8; }
+    .stat-label { font-size: 12px; color: #888; margin-top: 4px; }
+    .pipeline { margin-top: 20px; }
+    .pipeline-steps { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 12px; }
+    .step { background: #e8f0fe; color: #1a73e8; padding: 6px 12px; border-radius: 20px; font-size: 11px; font-weight: bold; }
+    .arrow { color: #aaa; font-size: 14px; }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+
+const ENDPOINT = 'http://localhost:4566';
+
+function App() {
+  const [appointments, setAppointments] = React.useState([]);
+  const [s3Files, setS3Files] = React.useState([]);
+  const [form, setForm] = React.useState({ patientName: '', patientId: '', doctor: '', department: 'Cardiology' });
+  const [loading, setLoading] = React.useState(false);
+  const [message, setMessage] = React.useState(null);
+  const [logs, setLogs] = React.useState([]);
+
+  const departments = ['Cardiology', 'Neurology', 'Orthopedics', 'Pediatrics', 'Oncology'];
+  const doctors = ['Dr. Priya', 'Dr. Sharma', 'Dr. Mehta', 'Dr. Rao', 'Dr. Khan'];
+
+  React.useEffect(() => {
+    fetchAppointments();
+    fetchS3Files();
+    const interval = setInterval(() => { fetchAppointments(); fetchS3Files(); }, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const fetchAppointments = async () => {
+    try {
+      const res = await fetch(`${ENDPOINT}/`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-amz-json-1.0',
+          'X-Amz-Target': 'DynamoDB_20120810.Scan',
+          'Authorization': 'AWS4-HMAC-SHA256 Credential=test/20240101/us-east-1/dynamodb/aws4_request, SignedHeaders=host, Signature=fake'
+        },
+        body: JSON.stringify({ TableName: 'patient-appointments' })
+      });
+      const result = await res.json();
+      if (result.Items) {
+        const items = result.Items.map(i => ({
+          appointmentId: i.appointmentId?.S,
+          patientName: i.patientName?.S,
+          patientId: i.patientId?.S,
+          doctor: i.doctor?.S,
+          department: i.department?.S,
+          status: i.status?.S,
+          createdAt: i.createdAt?.S
+        }));
+        items.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+        setAppointments(items);
+      }
+    } catch (e) { console.error('DynamoDB error', e); }
+  };
+
+  const fetchS3Files = async () => {
+    try {
+      const res = await fetch(`${ENDPOINT}/healthcare-records?list-type=2&prefix=appointments/`);
+      const text = await res.text();
+      const matches = [...text.matchAll(/<Key>(.*?)<\/Key>/g)].map(m => m[1]);
+      setS3Files(matches);
+    } catch (e) { console.error('S3 error', e); }
+  };
+
+  const fetchLogs = async (fnName) => {
+    try {
+      const streamsRes = await fetch(`${ENDPOINT}/`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-amz-json-1.1',
+          'X-Amz-Target': 'Logs_20140328.DescribeLogStreams',
+          'Authorization': 'AWS4-HMAC-SHA256 Credential=test/20240101/us-east-1/logs/aws4_request, SignedHeaders=host, Signature=fake'
+        },
+        body: JSON.stringify({ logGroupName: `/aws/lambda/${fnName}`, orderBy: 'LastEventTime', descending: true, limit: 1 })
+      });
+      const streamsData = await streamsRes.json();
+      const streamName = streamsData.logStreams?.[0]?.logStreamName;
+      if (!streamName) { setLogs(['No logs found']); return; }
+
+      const logsRes = await fetch(`${ENDPOINT}/`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-amz-json-1.1',
+          'X-Amz-Target': 'Logs_20140328.GetLogEvents',
+          'Authorization': 'AWS4-HMAC-SHA256 Credential=test/20240101/us-east-1/logs/aws4_request, SignedHeaders=host, Signature=fake'
+        },
+        body: JSON.stringify({ logGroupName: `/aws/lambda/${fnName}`, logStreamName: streamName, limit: 50 })
+      });
+      const logsData = await logsRes.json();
+      setLogs(logsData.events?.map(e => e.message?.trim()).filter(Boolean) || ['No events']);
+    } catch(e) { setLogs(['Error: ' + e.message]); }
+  };
+
+  const bookAppointment = async () => {
+    if (!form.patientName || !form.doctor) {
+      setMessage({ type: 'error', text: 'Please fill in Patient Name and Doctor' });
+      return;
+    }
+    if (!/^[a-zA-Z ]+$/.test(form.patientName.trim())) {
+      setMessage({ type: 'error', text: 'Patient Name must contain letters only — no numbers or special characters' });
+      return;
+    }
+    if (form.patientName.trim().length < 3) {
+      setMessage({ type: 'error', text: 'Patient Name must be at least 3 characters' });
+      return;
+    }
+    setLoading(true);
+    setMessage(null);
+    try {
+      const payload = {
+        patientName: form.patientName,
+        patientId: form.patientId || 'P-' + Date.now(),
+        doctor: form.doctor,
+        department: form.department,
+        status: 'BOOKED'
+      };
+      const res = await fetch(`${ENDPOINT}/2015-03-31/functions/producer/invocations`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const raw = await res.json();
+      const body = typeof raw.body === 'string' ? JSON.parse(raw.body) : raw;
+      setMessage({ type: 'success', text: `Booked! ID: ${body.appointmentId}` });
+      setForm({ patientName: '', patientId: '', doctor: '', department: 'Cardiology' });
+      setTimeout(fetchAppointments, 1500);
+    } catch (e) {
+      setMessage({ type: 'error', text: 'Booking failed: ' + e.message });
+    }
+    setLoading(false);
+  };
+
+  const confirmAppointment = async (apt) => {
+    const payload = btoa(JSON.stringify(apt));
+    try {
+      await fetch(`${ENDPOINT}/2015-03-31/functions/consumer/invocations`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ Records: [{ kinesis: { data: payload } }] })
+      });
+      setMessage({ type: 'success', text: `Confirmed: ${apt.appointmentId}` });
+      setTimeout(() => { fetchAppointments(); fetchS3Files(); }, 1500);
+    } catch (e) {
+      setMessage({ type: 'error', text: 'Confirm failed: ' + e.message });
+    }
+  };
+
+  const booked = appointments.filter(a => a.status === 'BOOKED').length;
+  const confirmed = appointments.filter(a => a.status === 'CONFIRMED').length;
+
+  return (
+    <div>
+      <div className="header">
+        <h1>🏥 Healthcare Demo Dashboard</h1>
+        <p>MiniStack · AWS Local Emulator · Running on localhost:4566</p>
+      </div>
+      <div className="container">
+        <div className="stats">
+          <div className="stat"><div className="stat-num">{appointments.length}</div><div className="stat-label">Total Appointments</div></div>
+          <div className="stat"><div className="stat-num" style={{color:'#f4a100'}}>{booked}</div><div className="stat-label">Pending (BOOKED)</div></div>
+          <div className="stat"><div className="stat-num" style={{color:'#34a853'}}>{confirmed}</div><div className="stat-label">Confirmed</div></div>
+        </div>
+        <div className="grid">
+          <div>
+            <div className="card">
+              <h2>📋 Book Appointment</h2>
+              {message && <div className={`alert alert-${message.type}`}>{message.text}</div>}
+              <div className="form-group">
+                <label>Patient Name</label>
+                <input value={form.patientName} onChange={e => setForm({...form, patientName: e.target.value})} placeholder="e.g. Raj Kumar" />
+              </div>
+              <div className="form-group">
+                <label>Patient ID (optional)</label>
+                <input value={form.patientId} onChange={e => setForm({...form, patientId: e.target.value})} placeholder="e.g. P-1001" />
+              </div>
+              <div className="form-group">
+                <label>Doctor</label>
+                <select value={form.doctor} onChange={e => setForm({...form, doctor: e.target.value})}>
+                  <option value="">Select doctor</option>
+                  {doctors.map(d => <option key={d}>{d}</option>)}
+                </select>
+              </div>
+              <div className="form-group">
+                <label>Department</label>
+                <select value={form.department} onChange={e => setForm({...form, department: e.target.value})}>
+                  {departments.map(d => <option key={d}>{d}</option>)}
+                </select>
+              </div>
+              <button className="btn" onClick={bookAppointment} disabled={loading}>
+                {loading ? 'Booking...' : '📅 Book Appointment'}
+              </button>
+            </div>
+            <div className="card pipeline">
+              <h2>🔄 Pipeline</h2>
+              <div className="pipeline-steps">
+                <span className="step">producer λ</span>
+                <span className="arrow">→</span>
+                <span className="step">DynamoDB</span>
+                <span className="arrow">+</span>
+                <span className="step">Kinesis</span>
+                <span className="arrow">+</span>
+                <span className="step">SNS→SQS</span>
+                <span className="arrow">→</span>
+                <span className="step">consumer λ</span>
+                <span className="arrow">→</span>
+                <span className="step">S3</span>
+              </div>
+            </div>
+          </div>
+          <div>
+            <div className="card">
+              <h2>📊 Appointments <span style={{fontSize:'11px',color:'#888'}}>(auto-refreshes every 5s)</span>
+                {appointments.filter(a => a.status === 'BOOKED').length > 0 && (
+                  <button className="btn-sm" style={{marginLeft:'10px',background:'#1a73e8'}} onClick={() => appointments.filter(a => a.status === 'BOOKED').forEach(a => confirmAppointment(a))}>
+                    ✓ Confirm All
+                  </button>
+                )}
+              </h2>
+              {appointments.length === 0 ? <div className="empty">No appointments yet. Book one!</div> : (
+                <div className="table-wrap">
+                  <table>
+                    <thead><tr><th>ID</th><th>Patient</th><th>Doctor</th><th>Dept</th><th>Status</th><th>Action</th></tr></thead>
+                    <tbody>
+                      {appointments.map(a => (
+                        <tr key={a.appointmentId}>
+                          <td style={{fontSize:'11px'}}>{a.appointmentId?.slice(-8)}</td>
+                          <td>{a.patientName}</td>
+                          <td>{a.doctor}</td>
+                          <td>{a.department}</td>
+                          <td><span className={`badge badge-${a.status?.toLowerCase()}`}>{a.status}</span></td>
+                          <td>{a.status === 'BOOKED' && <button className="btn-sm" onClick={() => confirmAppointment(a)}>✓ Confirm</button>}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+            <div className="card" style={{marginTop:'20px'}}>
+              <h2>📋 CloudWatch Logs</h2>
+              <div style={{display:'flex',gap:'8px',marginBottom:'12px'}}>
+                <button className="btn-sm" style={{background:'#1a73e8'}} onClick={() => fetchLogs('producer')}>producer λ</button>
+                <button className="btn-sm" style={{background:'#1a73e8'}} onClick={() => fetchLogs('consumer')}>consumer λ</button>
+              </div>
+              {logs.length === 0 ? <div className="empty">Click a Lambda to view logs</div> : (
+                <div style={{background:'#1e1e1e',borderRadius:'6px',padding:'12px',maxHeight:'200px',overflowY:'auto'}}>
+                  {logs.map((l,i) => (
+                    <div key={i} style={{fontFamily:'monospace',fontSize:'11px',color: l.includes('ERROR') ? '#f48771' : l.includes('REPORT') ? '#4ec9b0' : l.includes('START') ? '#569cd6' : '#d4d4d4',padding:'2px 0',borderBottom:'1px solid #2d2d2d'}}>{l}</div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="card" style={{marginTop:'20px'}}>
+              <h2>🗂️ S3 Records (healthcare-records)</h2>
+              {s3Files.length === 0 ? <div className="empty">No records yet</div> : (
+                <ul className="s3-list">
+                  {s3Files.map(f => (
+                    <li key={f}>
+                      <span>📄 {f.replace('appointments/', '')}</span>
+                      <span style={{color:'#888', fontSize:'11px'}}>healthcare-records/appointments/</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

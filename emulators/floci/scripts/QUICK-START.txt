@@ -1,0 +1,106 @@
+================================================================================
+  EVENT BOOKING PLATFORM - QUICK START MONITORING
+================================================================================
+
+OPTION 1: AUTOMATIC (All-in-One)
+================================
+bash scripts/watch-all.sh
+
+This launches all 5 monitors automatically.
+
+
+OPTION 2: MANUAL (5 Separate Terminals)
+========================================
+Terminal 1:  bash scripts/watch-logs.sh       → CloudWatch Logs
+Terminal 2:  bash scripts/watch-bookings.sh   → DynamoDB Bookings
+Terminal 3:  bash scripts/watch-events.sh     → DynamoDB Events
+Terminal 4:  bash scripts/watch-sqs.sh        → SQS Queue
+Terminal 5:  bash scripts/watch-s3.sh         → S3 Buckets
+
+
+COMPLETE SETUP FLOW
+===================
+1. Start Floci (if not running):
+   podman-compose up -d
+
+2. Deploy infrastructure:
+   bash scripts/deploy.sh
+
+3. Launch monitors:
+   bash scripts/watch-all.sh
+
+4. In another terminal, start frontend:
+   cd frontend && npm start
+
+5. Open browser:
+   http://localhost:3000
+
+6. Login:
+   demo@example.com / Demo@123456
+
+7. Book an event and watch the data flow in real-time!
+
+
+WHAT EACH MONITOR SHOWS
+=======================
+watch-logs.sh        → Lambda function execution logs (real-time)
+watch-bookings.sh    → Booking status changes (PENDING → PROCESSING → CONFIRMED)
+watch-events.sh      → Available events catalog
+watch-sqs.sh         → Messages in queue waiting for processing
+watch-s3.sh          → Uploaded PDF tickets and frontend files
+
+
+THE DATA FLOW YOU'LL SEE
+=======================
+1. User books event
+   ↓
+2. watch-bookings.sh → New booking (PENDING)
+3. watch-logs.sh → "Booking created"
+4. watch-sqs.sh → Message appears
+   ↓
+5. Ticket Generator processes
+   ↓
+6. watch-bookings.sh → Status changes to PROCESSING
+7. watch-logs.sh → "Generating PDF..."
+   ↓
+8. Ticket uploaded
+   ↓
+9. watch-bookings.sh → Status changes to CONFIRMED
+10. watch-s3.sh → New PDF ticket appears
+11. watch-logs.sh → "Upload complete"
+    ↓
+12. User can download ticket!
+
+
+KEYBOARD SHORTCUTS
+==================
+Ctrl+C           → Stop any script
+Ctrl+B, then D   → Detach from tmux session (if using tmux)
+
+
+DOCUMENTATION
+==============
+Full details: scripts/MONITORING.md
+
+Key commands:
+- bash scripts/watch-logs.sh       (Real-time Lambda logs)
+- bash scripts/watch-bookings.sh   (Booking data)
+- bash scripts/watch-events.sh     (Events catalog)
+- bash scripts/watch-sqs.sh        (Queue messages)
+- bash scripts/watch-s3.sh         (Uploaded files)
+- bash scripts/watch-all.sh        (Launch all 5)
+
+
+TROUBLESHOOTING
+===============
+Scripts won't run:
+  chmod +x scripts/watch-*.sh
+
+No logs appearing:
+  Go to http://localhost:3000 and trigger an action
+
+No SQS messages:
+  This is normal - they process quickly!
+  Book an event and immediately check watch-sqs.sh
+
+================================================================================

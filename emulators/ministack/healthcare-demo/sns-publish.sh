@@ -1,0 +1,1 @@
+aws --endpoint-url=http://localhost:4566 sns publish --topic-arn arn:aws:sns:us-east-1:000000000000:patient-notifications --message "Appointment confirmed for Raj Kumar with Dr. Priya on 2026-06-15 at 10:30 AM" --subject "Appointment Confirmation"
