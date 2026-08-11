@@ -12,10 +12,18 @@ npm run start:dev
 
 Swagger UI is served at `http://localhost:3000/api` once the app is running.
 
-Alternatively, run `./run.sh` (Git Bash / WSL / Linux / macOS) to build, start the server, smoke test the `/`, `/api`, `/terminology`, and `/translate` endpoints, and shut it back down. Pass a terminology file to also exercise the upload endpoint:
+## Scripts
+
+Run these with Git Bash / WSL / Linux / macOS.
+
+- `./run.sh` — build and start the server in the foreground (Ctrl+C to stop). Prints the app and Swagger URLs on startup.
+- `./run-test.sh [terminology-file]` — build, start the server, smoke test the `/`, `/api`, `/terminology`, and `/translate` endpoints, then shut it back down. Pass a terminology file to also exercise the upload endpoint (skipped otherwise).
+- `./upload.sh [terminology-file]` — upload a custom terminology file to an already-running server. Defaults to `test/fixtures/exclude-list-v1.csv` when no path is given.
+- `./test.sh "text to translate"` — translate English text into German, French, and Spanish against an already-running server, applying the `exclude-list-v1` terminology.
 
 ```bash
-./run.sh path/to/exclude-list-v1.csv
+./run-test.sh test/fixtures/exclude-list-v1.csv
+./test.sh "AWS and Playwright make testing stable and flaky test free."
 ```
 
 ## Environment variables
@@ -76,7 +84,7 @@ Set `"useCustomTerminology": false` in the body to translate without the termino
 
 ## Testing with curl
 
-With the server running (`npm run start:dev` or `./run.sh`), run these in order against `http://localhost:3000` to exercise the full flow using the sample fixture at `test/fixtures/exclude-list-v1.csv`:
+See [Scripts](#scripts) above for `upload.sh` and `test.sh`, which wrap the upload and translate calls below. To run them manually instead, with the server running (`npm run start:dev` or `./run.sh`), run these in order against `http://localhost:3000` to exercise the full flow using the sample fixture at `test/fixtures/exclude-list-v1.csv`:
 
 ```bash
 # 1. Health check
