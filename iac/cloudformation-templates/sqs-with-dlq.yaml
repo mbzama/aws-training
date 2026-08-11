@@ -1,0 +1,139 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  SQS Standard Queue with a Dead-Letter Queue (DLQ).
+
+  Messages that fail processing MaxReceiveCount times are moved to the DLQ.
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Queue Configuration
+        Parameters:
+          - QueueName
+          - VisibilityTimeout
+          - MessageRetentionPeriod
+          - DelaySeconds
+      - Label:
+          default: Dead-Letter Queue Configuration
+        Parameters:
+          - MaxReceiveCount
+          - DlqMessageRetentionPeriod
+    ParameterLabels:
+      QueueName:
+        default: Queue Name
+      VisibilityTimeout:
+        default: Visibility Timeout (seconds)
+      MessageRetentionPeriod:
+        default: Message Retention Period (seconds)
+      DelaySeconds:
+        default: Delivery Delay (seconds)
+      MaxReceiveCount:
+        default: Max Receive Count Before DLQ
+      DlqMessageRetentionPeriod:
+        default: DLQ Message Retention Period (seconds)
+
+Parameters:
+  QueueName:
+    Type: String
+    Default: my-queue
+    Description: Base name for the queue (the DLQ is named "<QueueName>-dlq").
+
+  VisibilityTimeout:
+    Type: Number
+    Default: 30
+    MinValue: 0
+    MaxValue: 43200
+    Description: Time (seconds) a message stays invisible after being received.
+
+  MessageRetentionPeriod:
+    Type: Number
+    Default: 345600
+    MinValue: 60
+    MaxValue: 1209600
+    Description: How long (seconds) the main queue retains messages. Default 4 days.
+
+  DelaySeconds:
+    Type: Number
+    Default: 0
+    MinValue: 0
+    MaxValue: 900
+    Description: Delay (seconds) before a message becomes visible after being sent.
+
+  MaxReceiveCount:
+    Type: Number
+    Default: 5
+    MinValue: 1
+    MaxValue: 1000
+    Description: Number of receive attempts before a message moves to the DLQ.
+
+  DlqMessageRetentionPeriod:
+    Type: Number
+    Default: 1209600
+    MinValue: 60
+    MaxValue: 1209600
+    Description: How long (seconds) the DLQ retains messages. Default 14 days.
+
+Resources:
+
+  # ---------------------------------------------------------------
+  # Dead-Letter Queue
+  # ---------------------------------------------------------------
+
+  DeadLetterQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub '${QueueName}-dlq'
+      MessageRetentionPeriod: !Ref DlqMessageRetentionPeriod
+      Tags:
+        - Key: Name
+          Value: !Sub '${QueueName}-dlq'
+
+  # ---------------------------------------------------------------
+  # Main Queue
+  # Redrives to the DLQ after MaxReceiveCount failed receives.
+  # ---------------------------------------------------------------
+
+  MainQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Ref QueueName
+      VisibilityTimeout: !Ref VisibilityTimeout
+      MessageRetentionPeriod: !Ref MessageRetentionPeriod
+      DelaySeconds: !Ref DelaySeconds
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt DeadLetterQueue.Arn
+        maxReceiveCount: !Ref MaxReceiveCount
+      Tags:
+        - Key: Name
+          Value: !Ref QueueName
+
+# ---------------------------------------------------------------
+# Outputs
+# ---------------------------------------------------------------
+
+Outputs:
+
+  MainQueueUrl:
+    Description: URL of the main queue
+    Value: !Ref MainQueue
+    Export:
+      Name: !Sub '${AWS::StackName}-queue-url'
+
+  MainQueueArn:
+    Description: ARN of the main queue
+    Value: !GetAtt MainQueue.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-queue-arn'
+
+  DeadLetterQueueUrl:
+    Description: URL of the dead-letter queue
+    Value: !Ref DeadLetterQueue
+    Export:
+      Name: !Sub '${AWS::StackName}-dlq-url'
+
+  DeadLetterQueueArn:
+    Description: ARN of the dead-letter queue
+    Value: !GetAtt DeadLetterQueue.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-dlq-arn'
